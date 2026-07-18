@@ -1,4 +1,4 @@
-#include "ContrivedImageProcessor.h"
+#include "DemoImageProcessor.h"
 
 #include <algorithm>
 #include <cmath>
@@ -148,9 +148,9 @@ std::uint8_t ToByte(double value) {
 
 }  // namespace
 
-ContrivedRgbaImage RenderContrivedImage(const GraphSnapshot& snapshot,
-                                        int width, int height) {
-  ContrivedRgbaImage image;
+DemoRgbaImage RenderDemoImage(const GraphSnapshot& snapshot, int width,
+                              int height) {
+  DemoRgbaImage image;
   if (width <= 0 || height <= 0) return image;
   const std::size_t pixelCount =
       static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
@@ -162,9 +162,9 @@ ContrivedRgbaImage RenderContrivedImage(const GraphSnapshot& snapshot,
 
   const bool noiseFeedsGrade =
       HasEdge(snapshot, "/Demo/Grade", "input", "/Demo/Noise",
-              "noise:amplitude", false);
+              "output", false);
   const bool gradeFeedsDisplay =
-      HasEdge(snapshot, "/Demo/Display", "surface", "/Demo/Grade", "mix",
+      HasEdge(snapshot, "/Demo/Display", "surface", "/Demo/Grade", "output",
               false);
   const bool maskFeedsGrade =
       HasEdge(snapshot, "/Demo/Grade", "mask", "/Demo/Mask", "", true);
@@ -240,7 +240,7 @@ ContrivedRgbaImage RenderContrivedImage(const GraphSnapshot& snapshot,
   return image;
 }
 
-std::uint64_t ContrivedImageChecksum(const ContrivedRgbaImage& image) {
+std::uint64_t DemoImageChecksum(const DemoRgbaImage& image) {
   // FNV-1a includes dimensions so differently shaped images with the same byte
   // prefix cannot report the same contract checksum.
   std::uint64_t hash = 1469598103934665603ULL;

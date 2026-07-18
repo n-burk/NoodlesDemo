@@ -6,7 +6,7 @@ if(TARGET noodles::noodles)
 elseif(TARGET noodles)
   set(_noodles_example_target noodles)
 else()
-  message(FATAL_ERROR "NoodlesApple demos require a Noodles target")
+  message(FATAL_ERROR "NoodlesDemo requires a Noodles target")
 endif()
 
 get_target_property(_noodles_target_asset_dir
@@ -31,8 +31,8 @@ if(NOT EXISTS "${_noodles_example_asset_dir}/shaders" OR
 endif()
 
 add_library(NoodlesAppleExampleFixture STATIC
-  ContrivedGraphFixture.cpp
-  ContrivedImageProcessor.cpp)
+  DemoGraphFixture.cpp
+  DemoImageProcessor.cpp)
 target_compile_features(NoodlesAppleExampleFixture PUBLIC cxx_std_17)
 target_include_directories(NoodlesAppleExampleFixture PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -96,43 +96,43 @@ function(noodles_apple_bundle_noodles_runtime target)
 endfunction()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesAppleUIKit)
-  add_executable(NoodlesAppleiPadDemo MACOSX_BUNDLE
+  add_executable(NoodlesDemo MACOSX_BUNDLE
     iPad/main.mm
-    iPad/NoodlesAppleiPadDemoViewController.mm
-    iPad/NoodlesAppleiPadDemoViewController.h)
-  target_compile_options(NoodlesAppleiPadDemo PRIVATE
+    iPad/NoodlesDemoViewController.mm
+    iPad/NoodlesDemoViewController.h)
+  target_compile_options(NoodlesDemo PRIVATE
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
-  target_link_libraries(NoodlesAppleiPadDemo PRIVATE
+  target_link_libraries(NoodlesDemo PRIVATE
     NoodlesApple::UIKit NoodlesAppleExampleFixture
     "-framework Foundation" "-framework CoreGraphics")
-  set_target_properties(NoodlesAppleiPadDemo PROPERTIES
-    MACOSX_BUNDLE_BUNDLE_NAME "NoodlesApple iPad Demo"
-    MACOSX_BUNDLE_GUI_IDENTIFIER "org.noodlesapple.demo.ipad"
+  set_target_properties(NoodlesDemo PROPERTIES
+    MACOSX_BUNDLE_BUNDLE_NAME "NoodlesDemo"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "org.noodlesdemo.ipad"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/iPad/Info.plist.in"
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC "YES"
     XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
-    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.noodlesapple.demo.ipad"
+    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.noodlesdemo.ipad"
     XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "2")
-  noodles_apple_add_demo_resources(NoodlesAppleiPadDemo)
-  noodles_apple_bundle_noodles_runtime(NoodlesAppleiPadDemo)
+  noodles_apple_add_demo_resources(NoodlesDemo)
+  noodles_apple_bundle_noodles_runtime(NoodlesDemo)
 endif()
 
 if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND
    TARGET NoodlesAppleAppKit)
-  add_executable(NoodlesAppleMacDemo MACOSX_BUNDLE
+  add_executable(NoodlesDemo MACOSX_BUNDLE
     macOS/main.mm
-    macOS/NoodlesAppleMacDemoViewController.mm
-    macOS/NoodlesAppleMacDemoViewController.h)
-  target_compile_options(NoodlesAppleMacDemo PRIVATE
+    macOS/NoodlesDemoViewController.mm
+    macOS/NoodlesDemoViewController.h)
+  target_compile_options(NoodlesDemo PRIVATE
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
-  target_link_libraries(NoodlesAppleMacDemo PRIVATE
+  target_link_libraries(NoodlesDemo PRIVATE
     NoodlesApple::AppKit NoodlesAppleExampleFixture)
-  set_target_properties(NoodlesAppleMacDemo PROPERTIES
-    MACOSX_BUNDLE_BUNDLE_NAME "NoodlesApple Mac Demo"
-    MACOSX_BUNDLE_GUI_IDENTIFIER "org.noodlesapple.demo.macos"
+  set_target_properties(NoodlesDemo PROPERTIES
+    MACOSX_BUNDLE_BUNDLE_NAME "NoodlesDemo"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "org.noodlesdemo.macos"
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC "YES")
-  noodles_apple_add_demo_resources(NoodlesAppleMacDemo)
-  noodles_apple_bundle_noodles_runtime(NoodlesAppleMacDemo)
+  noodles_apple_add_demo_resources(NoodlesDemo)
+  noodles_apple_bundle_noodles_runtime(NoodlesDemo)
 endif()
 
 unset(_noodles_example_asset_dir)

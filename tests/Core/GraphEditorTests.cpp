@@ -72,6 +72,16 @@ ig::GraphProperty Display(std::string name, std::string type,
   return property;
 }
 
+ig::GraphProperty Port(std::string name, std::string type,
+                       ig::GraphPropertyDirection direction) {
+  ig::GraphProperty property;
+  property.name = std::move(name);
+  property.kind = ig::GraphPropertyKind::Attribute;
+  property.type = std::move(type);
+  property.direction = direction;
+  return property;
+}
+
 ig::GraphProperty Relationship(std::string name) {
   ig::GraphProperty property;
   property.name = std::move(name);
@@ -275,6 +285,96 @@ bool TestModelTopologyAndPins() {
   INK_CHECK(HasPin(bPins, "out", /*out=*/false));
   INK_CHECK(HasPin(bPins, "out", /*out=*/true));
   std::printf("  model topology + pin mapping ok\n");
+  return true;
+}
+
+bool TestExplicitOutputDirectionAndType() {
+  auto document = NewDocument(
+      {Node("/Ports/Source", true, 100.0, 100.0),
+       Node("/Ports/Sink", true, 700.0, 100.0)});
+  document->addProperty(
+      "/Ports/Source",
+      Port("output", "image", ig::GraphPropertyDirection::Output));
+  document->addProperty(
+      "/Ports/Sink",
+      Port("input", "image", ig::GraphPropertyDirection::Input));
+
+  ig::NoodlesGraphView view;
+  view.setDocument(document);
+  const auto sourcePins = view.nodePins("/Ports/Source");
+  const ig::GraphPinInfo* output =
+      FindPin(sourcePins, "output", /*isOutput=*/true);
+  INK_CHECK(output != nullptr);
+  INK_CHECK(output->typeText == "image");
+  INK_CHECK(FindPin(sourcePins, "output", /*isOutput=*/false) == nullptr);
+
+  double sourceX = 0.0, sourceWidth = 0.0;
+  INK_CHECK(view.nodePosition("/Ports/Source", &sourceX, nullptr));
+  INK_CHECK(view.nodeSize("/Ports/Source", &sourceWidth, nullptr));
+  ig::GraphLinkInfo preview;
+  view.pointerDown(sourceX + sourceWidth * 0.03, output->centerY);
+  INK_CHECK(!view.activeLinkPreview(&preview));
+  view.pointerUp(sourceX + sourceWidth * 0.03, output->centerY);
+
+  const auto sinkPins = view.nodePins("/Ports/Sink");
+  const ig::GraphPinInfo* input =
+      FindPin(sinkPins, "input", /*isOutput=*/false);
+  INK_CHECK(input != nullptr);
+  INK_CHECK(input->typeText == "image");
+  INK_CHECK(FindPin(sinkPins, "input", /*isOutput=*/true) == nullptr);
+
+  INK_CHECK(document->authorConnection("/Ports/Sink", "input",
+                                       "/Ports/Source", "output"));
+  view.refresh();
+  INK_CHECK(view.linkCount() == 1);
+  const auto links = view.links();
+  INK_CHECK(links.size() == 1);
+  INK_CHECK(links[0].sourceNodeId == "/Ports/Source");
+  INK_CHECK(links[0].sourcePort == "output");
+  INK_CHECK(std::abs(links[0].startX - output->centerX) < 1e-6);
+  INK_CHECK(std::abs(links[0].startY - output->centerY) < 1e-6);
+  std::printf("  explicit output row carries its image type and link source ok\n");
+  return true;
+}
+
+bool TestUnconnectedRowDragPreviewUsesRowEdge() {
+  auto document =
+      NewDocument({Node("/Preview/Source", true, 120.0, 90.0)});
+  document->addProperty("/Preview/Source", Numeric("top"));
+  document->addProperty("/Preview/Source", Numeric("middle"));
+  document->addProperty("/Preview/Source", Numeric("bottom"));
+
+  ig::NoodlesGraphView view;
+  view.setDocument(document);
+  const auto pins = view.nodePins("/Preview/Source");
+  const ig::GraphPinInfo* row = FindPin(pins, "top", /*isOutput=*/false);
+  INK_CHECK(row != nullptr);
+
+  double x = 0.0, y = 0.0, width = 0.0, height = 0.0;
+  INK_CHECK(view.nodePosition("/Preview/Source", &x, &y));
+  INK_CHECK(view.nodeSize("/Preview/Source", &width, &height));
+  INK_CHECK(std::abs(row->centerY - (y + height * 0.5)) > 1.0);
+  const double rightBandX = x + width * 0.97;
+
+  // The preview is initialized on pointerDown, before any move event, and the
+  // fixed source stays on the grabbed row's right edge for the whole drag.
+  view.pointerDown(rightBandX, row->centerY);
+  ig::GraphLinkInfo preview;
+  INK_CHECK(view.activeLinkPreview(&preview));
+  INK_CHECK(std::abs(preview.startX - (x + width)) < 1e-6);
+  INK_CHECK(std::abs(preview.startY - row->centerY) < 1e-6);
+  INK_CHECK(std::abs(preview.endX - preview.startX) < 1e-6);
+  INK_CHECK(std::abs(preview.endY - preview.startY) < 1e-6);
+
+  view.pointerMove(rightBandX + 160.0, row->centerY + 75.0);
+  INK_CHECK(view.activeLinkPreview(&preview));
+  INK_CHECK(std::abs(preview.startX - (x + width)) < 1e-6);
+  INK_CHECK(std::abs(preview.startY - row->centerY) < 1e-6);
+  INK_CHECK(std::abs(preview.startY - (y + height * 0.5)) > 1.0);
+
+  view.pointerUp(rightBandX + 160.0, row->centerY + 75.0);
+  INK_CHECK(!view.activeLinkPreview(&preview));
+  std::printf("  unconnected-row drag preview stays on right row edge ok\n");
   return true;
 }
 
@@ -1438,6 +1538,10 @@ int main() {
   struct Case { const char* name; bool (*fn)(); };
   const Case cases[] = {
       {"model_topology_and_pins", TestModelTopologyAndPins},
+      {"explicit_output_direction_and_type",
+       TestExplicitOutputDirectionAndType},
+      {"unconnected_row_preview_anchor",
+       TestUnconnectedRowDragPreviewUsesRowEdge},
       {"positions_and_layout", TestPositionsAndLayout},
       {"pointer_selects_node", TestPointerSelectsNode},
       {"pin_drag_authors_edge", TestPinDragAuthorsEdge},

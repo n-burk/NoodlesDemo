@@ -1,9 +1,9 @@
-#import "NoodlesAppleMacDemoViewController.h"
+#import "NoodlesDemoViewController.h"
 
 #import <NoodlesApple/AppKit/NoodlesAppleGraphView.h>
 
-#include "../ContrivedGraphFixture.h"
-#include "../ContrivedImageProcessor.h"
+#include "../DemoGraphFixture.h"
+#include "../DemoImageProcessor.h"
 
 #include <noodles/apple/GraphEditor.h>
 #include <noodles/apple/InMemoryGraphDocument.h>
@@ -40,7 +40,7 @@ NSTextField *ControlLabel(NSString *text) {
 }
 
 NSImage *ImageFromRgba(
-    const noodles::apple::examples::ContrivedRgbaImage &image) {
+    const noodles::apple::examples::DemoRgbaImage &image) {
   if (image.empty())
     return nil;
   const size_t rowBytes = static_cast<size_t>(image.width) * 4;
@@ -69,13 +69,13 @@ NSImage *ImageFromRgba(
 
 } // namespace
 
-@interface NoodlesAppleMacDemoViewController ()
+@interface NoodlesDemoViewController ()
 - (void)refreshOutputImage;
 @end
 
-@implementation NoodlesAppleMacDemoViewController {
+@implementation NoodlesDemoViewController {
   NSString *_assetsPath;
-  noodles::apple::examples::ContrivedGraphFixture _fixture;
+  noodles::apple::examples::DemoGraphFixture _fixture;
   NSImageView *_outputView;
   NoodlesAppleGraphView *_graphView;
   NSTextField *_statusLabel;
@@ -101,7 +101,7 @@ NSImage *ImageFromRgba(
   container.layer.backgroundColor = DemoBackgroundColor().CGColor;
   self.view = container;
 
-  _fixture = noodles::apple::examples::CreateContrivedGraphFixture();
+  _fixture = noodles::apple::examples::CreateDemoGraphFixture();
   _displayFrame = 12.0;
   _outputView = [[NSImageView alloc] initWithFrame:container.bounds];
   _outputView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -211,16 +211,16 @@ NSImage *ImageFromRgba(
     [fitGraph.heightAnchor constraintEqualToConstant:28.0],
   ]];
 
-  __weak NoodlesAppleMacDemoViewController *weakSelf = self;
+  __weak NoodlesDemoViewController *weakSelf = self;
   _graphView.onStatus = ^(NSString *message) {
-    NoodlesAppleMacDemoViewController *controller = weakSelf;
+    NoodlesDemoViewController *controller = weakSelf;
     if (!controller)
       return;
     controller->_statusLabel.stringValue =
         message.length > 0 ? message : @"Ready";
   };
   _graphView.onSelectionChanged = ^(NSString *nodeId) {
-    NoodlesAppleMacDemoViewController *controller = weakSelf;
+    NoodlesDemoViewController *controller = weakSelf;
     if (!controller)
       return;
     controller->_selectionLabel.stringValue =
@@ -232,17 +232,17 @@ NSImage *ImageFromRgba(
         (void)nodeId;
         (void)attributeName;
         (void)live;
-        NoodlesAppleMacDemoViewController *controller = weakSelf;
+        NoodlesDemoViewController *controller = weakSelf;
         if (controller)
           [controller refreshOutputImage];
       };
   _graphView.onTopologyEdited = ^{
-    NoodlesAppleMacDemoViewController *controller = weakSelf;
+    NoodlesDemoViewController *controller = weakSelf;
     if (controller)
       [controller refreshOutputImage];
   };
   _graphView.onGraphStructureChanged = ^{
-    NoodlesAppleMacDemoViewController *controller = weakSelf;
+    NoodlesDemoViewController *controller = weakSelf;
     if (controller)
       [controller refreshOutputImage];
   };
@@ -254,8 +254,8 @@ NSImage *ImageFromRgba(
     return;
   const noodles::apple::GraphSnapshot snapshot =
       _fixture.document->snapshot(_displayFrame);
-  const noodles::apple::examples::ContrivedRgbaImage output =
-      noodles::apple::examples::RenderContrivedImage(snapshot, 640, 400);
+  const noodles::apple::examples::DemoRgbaImage output =
+      noodles::apple::examples::RenderDemoImage(snapshot, 640, 400);
   _outputView.image = ImageFromRgba(output);
 }
 
@@ -315,9 +315,9 @@ NSImage *ImageFromRgba(
     // Defer until AppKit has committed the presented window's final backing
     // size and the OpenGL view has swapped fallback text metrics for the real
     // atlas. The same action remains user-accessible through Fit.
-    __weak NoodlesAppleMacDemoViewController *weakSelf = self;
+    __weak NoodlesDemoViewController *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleMacDemoViewController *controller = weakSelf;
+      NoodlesDemoViewController *controller = weakSelf;
       if (controller && !controller->_didFrameGraph) {
         controller->_didFrameGraph =
             [controller->_graphView frameAllWithPadding:32.0];

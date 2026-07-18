@@ -11,6 +11,7 @@ namespace noodles::apple {
 // Plain, persistence-agnostic data consumed by GraphEditor. A GraphDocument may
 // be backed by the reference in-memory model or an application's own storage.
 enum class GraphPropertyKind { Attribute, Relationship };
+enum class GraphPropertyDirection { Input, Output };
 enum class GraphPortKind { Connection, Relationship };
 
 struct GraphPort {
@@ -29,6 +30,12 @@ struct GraphProperty {
   bool isScrubable = false;
   double numericValue = 0.0;
   std::string displayValue;
+
+  // Attribute rows default to input-side presentation for compatibility with
+  // existing document adapters. Output attributes are rendered as typed,
+  // output-only rows on the node's right edge. Relationships remain output
+  // rows regardless of this value.
+  GraphPropertyDirection direction = GraphPropertyDirection::Input;
 };
 
 struct GraphNode {

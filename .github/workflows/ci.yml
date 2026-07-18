@@ -77,7 +77,7 @@ jobs:
             -DNOODLES_APPLE_BUILD_EXAMPLES=ON \
             -DNOODLES_APPLE_BUILD_TESTS=OFF
           cmake --build build-ios --config Release \
-            --target NoodlesAppleiPadDemo --parallel
+            --target NoodlesDemo --parallel
       - name: Build iPad demo for the device SDK
         run: |
           cmake -S . -B build-ios-device -G Xcode \
@@ -89,4 +89,4 @@ jobs:
             -DNOODLES_APPLE_BUILD_EXAMPLES=ON \
             -DNOODLES_APPLE_BUILD_TESTS=OFF
           cmake --build build-ios-device --config Release \
-            --target NoodlesAppleiPadDemo --parallel
+            --target NoodlesDemo --parallel

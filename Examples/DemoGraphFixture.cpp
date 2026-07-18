@@ -1,4 +1,4 @@
-#include "ContrivedGraphFixture.h"
+#include "DemoGraphFixture.h"
 
 #include <noodles/apple/GraphDocument.h>
 #include <noodles/apple/GraphEditor.h>
@@ -42,6 +42,15 @@ GraphProperty Relationship(std::string name) {
   return property;
 }
 
+GraphProperty Port(std::string name, std::string type,
+                   GraphPropertyDirection direction) {
+  GraphProperty property;
+  property.name = std::move(name);
+  property.type = std::move(type);
+  property.direction = direction;
+  return property;
+}
+
 GraphNode Node(std::string id, std::string name, std::string type,
                std::vector<GraphProperty> properties) {
   GraphNode node;
@@ -54,20 +63,23 @@ GraphNode Node(std::string id, std::string name, std::string type,
 
 } // namespace
 
-ContrivedGraphFixture CreateContrivedGraphFixture() {
+DemoGraphFixture CreateDemoGraphFixture() {
   GraphSnapshot snapshot;
   snapshot.nodes.push_back(
       Node("/Demo/Noise", "Noise", "Generator",
            {Number("noise:frequency", "float", 2.5),
             Number("noise:amplitude", "float", 0.75),
-            Toggle("enabled", true)}));
+            Toggle("enabled", true),
+            Port("output", "image", GraphPropertyDirection::Output)}));
   snapshot.nodes.push_back(Node(
       "/Demo/Grade", "Color Grade", "Processor",
-      {Number("input", "color3f", 0.25, false), Number("gain", "float", 1.2),
-       Number("mix", "float", 0.8), Relationship("mask")}));
+      {Port("input", "image", GraphPropertyDirection::Input),
+       Number("gain", "float", 1.2), Number("mix", "float", 0.8),
+       Relationship("mask"),
+       Port("output", "image", GraphPropertyDirection::Output)}));
   snapshot.nodes.push_back(
       Node("/Demo/Display", "Display", "Output",
-           {Number("surface", "color3f", 0.5, false),
+           {Port("surface", "image", GraphPropertyDirection::Input),
             Number("exposure", "float", 0.0), Toggle("visible", true)}));
   snapshot.nodes.push_back(
       Node("/Demo/Mask", "Ellipse Mask", "Shape",
@@ -79,14 +91,15 @@ ContrivedGraphFixture CreateContrivedGraphFixture() {
   snapshot.nodes.push_back(
       Node("/Demo/Source", "Source", "Generator",
            {Number("source:level", "float", 1.0),
-            Number("source:bias", "float", 0.0), Toggle("enabled", true)}));
+            Number("source:bias", "float", 0.0), Toggle("enabled", true),
+            Port("output", "image", GraphPropertyDirection::Output)}));
 
   // Connection edges use document-authoring orientation: the input property is
   // the source endpoint and points at the upstream output property.
   snapshot.edges.push_back(
-      {"/Demo/Grade", "input", "/Demo/Noise", "noise:amplitude", false});
+      {"/Demo/Grade", "input", "/Demo/Noise", "output", false});
   snapshot.edges.push_back(
-      {"/Demo/Display", "surface", "/Demo/Grade", "mix", false});
+      {"/Demo/Display", "surface", "/Demo/Grade", "output", false});
   snapshot.edges.push_back({"/Demo/Grade", "mask", "/Demo/Mask", "", true});
 
   auto document = std::make_shared<InMemoryGraphDocument>(std::move(snapshot));

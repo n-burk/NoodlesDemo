@@ -121,6 +121,10 @@ class GraphEditor {
   bool nodeSize(const std::string& id, double* w, double* h) const;
   std::vector<GraphPinInfo> nodePins(const std::string& id) const;
   std::vector<GraphLinkInfo> links() const;
+  // Returns the transient noodle shown during connection authoring/reconnect.
+  // This is useful to hosts that expose drag state through accessibility and
+  // keeps preview geometry testable without a GL readback.
+  bool activeLinkPreview(GraphLinkInfo* preview) const;
 
   bool minimapVisible() const;
   bool minimapRect(double* x, double* y, double* w, double* h) const;

@@ -8,7 +8,7 @@ Apple GL views, resource plumbing, and runnable example applications.
 
 The core is host-agnostic and depends only on `noodles::noodles`. OpenUSD is an
 optional adapter, not part of the core API. The Inkwell iPad application uses
-that adapter while the public demos use an in-memory contrived graph, so both
+that adapter while the public demos use an in-memory demo graph, so both
 exercise the same layout, rendering, hit-testing, value editing, connection,
 folding, minimap, and gesture implementation.
 
@@ -27,12 +27,15 @@ forwards optional stylus misses to a background canvas.
 
 ## Runnable demo surface
 
-Both example apps render the same five-node fixture (four initially visible and
+The runnable macOS and iPadOS products are both named NoodlesDemo. They render
+the same five-node fixture (four initially visible and
 one host-addable Source) over the same generated landscape image. That image is
 produced by a shared C++ example processor from the graph snapshot, so live
 value edits, Boolean toggles, connection edits, and frame interpolation have
-visible output instead of changing the graph UI alone. The apps also expose
-controls for the shipping overlay defaults:
+visible output instead of changing the graph UI alone. Image data noodles leave
+an explicit right-side `output` row whose displayed type is `image`, rather than
+appearing to originate from one of the node's scalar controls. The apps also
+expose controls for the shipping overlay defaults:
 
 - overlay opacity from 0.15 through 1.0, initially 0.5;
 - display-frame scrubbing from frame 0 through 24, including an interpolated

@@ -11,8 +11,8 @@ add_test(NAME noodles_apple_core COMMAND NoodlesAppleCoreTests)
 # green.
 add_executable(NoodlesAppleDemoContractTests
   Core/DemoContractTests.cpp
-  ../Examples/ContrivedGraphFixture.cpp
-  ../Examples/ContrivedImageProcessor.cpp)
+  ../Examples/DemoGraphFixture.cpp
+  ../Examples/DemoImageProcessor.cpp)
 target_compile_features(NoodlesAppleDemoContractTests PRIVATE cxx_std_17)
 target_include_directories(NoodlesAppleDemoContractTests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../Examples")
@@ -55,7 +55,7 @@ if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
 
   add_executable(NoodlesAppleRenderTests
     Render/GraphEditorRenderTests.cpp
-    ../Examples/ContrivedGraphFixture.cpp)
+    ../Examples/DemoGraphFixture.cpp)
   target_include_directories(NoodlesAppleRenderTests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../Examples")
   target_compile_features(NoodlesAppleRenderTests PRIVATE cxx_std_17)

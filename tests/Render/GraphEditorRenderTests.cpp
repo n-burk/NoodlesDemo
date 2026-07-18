@@ -12,7 +12,7 @@
 // macOS-only (CGL). The title-drag, minimap, and relationship-exit cases gate
 // behavior; opaque and composite passes gate that node interiors paint.
 
-#include "ContrivedGraphFixture.h"
+#include "DemoGraphFixture.h"
 
 #include <noodles/apple/GraphEditor.h>
 #include <noodles/apple/InMemoryGraphDocument.h>
@@ -581,7 +581,7 @@ bool runDemoRealFontLayoutCase(const std::string& assets,
                                const std::string& fontJson,
                                GLuint defaultFbo) {
   std::printf("\n=== DEMO LAYOUT CASE: real-font relayout + frame-all ===\n");
-  auto fixture = ig::examples::CreateContrivedGraphFixture();
+  auto fixture = ig::examples::CreateDemoGraphFixture();
   glBindFramebuffer(GL_FRAMEBUFFER, defaultFbo);
   fixture.editor->initializeGL(assets, fontPng, fontJson);
   fixture.editor->resize(kW, kH, 1.0f);

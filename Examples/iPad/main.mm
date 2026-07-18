@@ -1,12 +1,12 @@
 #import <UIKit/UIKit.h>
 
-#import "NoodlesAppleiPadDemoViewController.h"
+#import "NoodlesDemoViewController.h"
 
-@interface NoodlesAppleiPadDemoAppDelegate : UIResponder <UIApplicationDelegate>
+@interface NoodlesDemoAppDelegate : UIResponder <UIApplicationDelegate>
 @property(nonatomic, strong) UIWindow *window;
 @end
 
-@implementation NoodlesAppleiPadDemoAppDelegate
+@implementation NoodlesDemoAppDelegate
 
 - (BOOL)application:(UIApplication *)application
     didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
@@ -14,8 +14,8 @@
   (void)launchOptions;
   NSString *assets = [NSBundle.mainBundle.resourcePath
       stringByAppendingPathComponent:@"noodles-assets"];
-  NoodlesAppleiPadDemoViewController *controller =
-      [[NoodlesAppleiPadDemoViewController alloc] initWithAssetsPath:assets];
+  NoodlesDemoViewController *controller =
+      [[NoodlesDemoViewController alloc] initWithAssetsPath:assets];
   self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
   self.window.rootViewController = controller;
   [self.window makeKeyAndVisible];
@@ -28,6 +28,6 @@ int main(int argc, char *argv[]) {
   @autoreleasepool {
     return UIApplicationMain(
         argc, argv, nil,
-        NSStringFromClass(NoodlesAppleiPadDemoAppDelegate.class));
+        NSStringFromClass(NoodlesDemoAppDelegate.class));
   }
 }

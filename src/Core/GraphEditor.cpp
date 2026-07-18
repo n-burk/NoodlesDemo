@@ -266,6 +266,10 @@ struct GraphEditor::Impl {
   std::string linkAnchorNode;       // the endpoint that stays fixed
   std::string linkAnchorPort;
   bool linkAnchorIsOutput = false;  // fixed endpoint's side
+  // Exact world-space row edge captured when the gesture starts. Keeping the
+  // anchor avoids re-resolving an unconnected input row as a nonexistent
+  // output pin (whose fallback is the node's vertical midpoint).
+  noodles::Vec2d linkAnchorWorld{0.0, 0.0};
   bool linkFromRelOutPin = false;   // tap on a rel output pin arms it (no move)
   noodles::LinkData linkLifted;     // reconnect: original link (restore on cancel)
   bool dragPreviewActive = false;   // a transient dangling link is in model.links
@@ -482,23 +486,6 @@ struct GraphEditor::Impl {
                     : n.relationshipInputPins.count(pin) > 0;
   }
 
-  // World position of an endpoint (mirrors rebuildLinkGeometry): a whole-prim
-  // relationship target attaches at the top-middle of its target arrow (above
-  // the node's top-center); every other endpoint resolves to its laid-out port
-  // center.
-  noodles::Vec2d endpointWorld(const std::string& nodeId,
-                               const std::string& port, bool isOutput,
-                               bool isRel) const {
-    auto it = model.nodes.find(nodeId);
-    if (it == model.nodes.end()) return noodles::Vec2d(0.0, 0.0);
-    const noodles::NodeData& n = it->second;
-    if (isRel && !isOutput && port.empty()) {
-      return noodles::Vec2d(n.position[0] + n.size[0] * 0.5,
-                            n.position[1] - kRelArrowHeight);
-    }
-    return nodeRenderer.resolvePortPosition(n, port, isOutput);
-  }
-
   // The index of the whole-prim relationship link whose target ARROW contains
   // `world` (with a fingertip slop), or -1. The arrow spans from the noodle end
   // (link.end, the arrow's top-middle) down to the target node's top edge, so
@@ -526,7 +513,9 @@ struct GraphEditor::Impl {
   // searching the input rows then the output rows. Sets *isRel when the row is a
   // relationship pin. Returns "" when localY is not on any row.
   std::string rowPinAt(const noodles::NodeData& n, double localY,
-                       bool* isRel) const {
+                       bool* isRel, bool* isOutput = nullptr) const {
+    if (isRel) *isRel = false;
+    if (isOutput) *isOutput = false;
     const std::string in = inputRowAt(n, localY);
     if (!in.empty()) {
       if (isRel) *isRel = n.relationshipInputPins.count(in) > 0;
@@ -538,6 +527,7 @@ struct GraphEditor::Impl {
     for (std::size_t i = 0; i < count; ++i) {
       if (std::abs(localY - n.layoutOutputCenterY[i]) <= half) {
         if (isRel) *isRel = n.relationshipOutputPins.count(n.outputPins[i]) > 0;
+        if (isOutput) *isOutput = true;
         return n.outputPins[i];
       }
     }
@@ -620,8 +610,12 @@ struct GraphEditor::Impl {
     const noodles::NodeData& n = model.nodes.at(nid);
     const double localY = world[1] - n.position[1];
     bool isRel = false;
-    const std::string pin = rowPinAt(n, localY, &isRel);
+    bool rowIsOutput = false;
+    const std::string pin = rowPinAt(n, localY, &isRel, &rowIsOutput);
     if (pin.empty()) return r;
+    // Explicit output rows are output-only. Legacy input rows remain usable
+    // from the right edge as data sources for backward compatibility.
+    if (!wantOutput && rowIsOutput) return r;
     r.found = true;
     r.nodeId = nid;
     r.port = pin;
@@ -636,6 +630,7 @@ struct GraphEditor::Impl {
     linkAnchorNode.clear();
     linkAnchorPort.clear();
     linkAnchorIsOutput = false;
+    linkAnchorWorld = noodles::Vec2d(0.0, 0.0);
     linkFromRelOutPin = false;
     linkLifted = noodles::LinkData();
   }
@@ -647,20 +642,21 @@ struct GraphEditor::Impl {
     noodles::LinkData preview;
     preview.isDangling = true;
     preview.isRelationship = linkIsRelationship;
+    // A render may occur between pointerDown and the first pointerMove. Start
+    // as a zero-length link at the real anchor instead of flashing at (0,0).
+    preview.start = linkAnchorWorld;
+    preview.end = linkAnchorWorld;
     model.links.push_back(preview);
     dragPreviewActive = true;
   }
   void updateDragPreview(const noodles::Vec2d& cursor, bool valid) {
     if (!dragPreviewActive || model.links.empty()) return;
     noodles::LinkData& L = model.links.back();
-    const noodles::Vec2d anchor = endpointWorld(linkAnchorNode, linkAnchorPort,
-                                                linkAnchorIsOutput,
-                                                linkIsRelationship);
     if (linkAnchorIsOutput) {
-      L.start = anchor;
+      L.start = linkAnchorWorld;
       L.end = cursor;
     } else {
-      L.end = anchor;
+      L.end = linkAnchorWorld;
       L.start = cursor;
     }
     L.isRelationship = linkIsRelationship;
@@ -690,6 +686,11 @@ struct GraphEditor::Impl {
     linkAnchorNode = nodeId;
     linkAnchorPort = port;
     linkAnchorIsOutput = isOutput;
+    if (auto it = model.nodes.find(nodeId); it != model.nodes.end()) {
+      linkAnchorWorld = rowEdgeAnchor(it->second, port, isOutput);
+    } else {
+      linkAnchorWorld = noodles::Vec2d(0.0, 0.0);
+    }
     linkIsRelationship = isRelationshipPin(nodeId, port, isOutput);
     linkFromRelOutPin = linkIsRelationship && isOutput;
     linkLifted = noodles::LinkData();
@@ -717,10 +718,12 @@ struct GraphEditor::Impl {
       linkAnchorNode = L.targetNodeId;  // anchor the input side
       linkAnchorPort = L.targetPort;
       linkAnchorIsOutput = false;
+      linkAnchorWorld = L.end;
     } else {
       linkAnchorNode = L.sourceNodeId;  // anchor the output side
       linkAnchorPort = L.sourcePort;
       linkAnchorIsOutput = true;
+      linkAnchorWorld = L.start;
     }
 
     model.links.erase(model.links.begin() + linkIndex);
@@ -1416,41 +1419,46 @@ struct GraphEditor::Impl {
     return std::min(kZoomMin, fitZoom * 0.25);
   }
 
-  // ── relationship source anchor (item 3) ──
-  // Right-edge center of the ROW a relationship link originates from. A
-  // relationship whose name is namespaced (e.g. "custom:link") is grouped
-  // under a header row by the display-pin builder; when that group is FOLDED the
-  // pin has no visible row of its own, so anchor at the header row instead of
-  // the node's aggregate vertical center (the pinCircleCenter fallback) or a
-  // synthetic title-area handle. When the pin has its own visible row, that
-  // row's right-edge center is used (the common, unfolded case).
+  // Exact edge position for a displayed row. Legacy input rows may start an
+  // output drag from the right edge even before they have an output mirror.
+  // Resolve the requested side first, then reuse the
+  // opposite side's row Y, including folded-child → header routing. Only the X
+  // is forced to the requested edge.
+  noodles::Vec2d rowEdgeAnchor(const noodles::NodeData& n,
+                               const std::string& port,
+                               bool isOutput) const {
+    noodles::Vec2d anchor;
+    const auto resolveVisible = [&](bool side, const std::string& candidate,
+                                    noodles::Vec2d* result) {
+      const auto& pins = side ? n.outputPins : n.inputPins;
+      if (std::find(pins.begin(), pins.end(), candidate) == pins.end()) {
+        return false;
+      }
+      *result = nodeRenderer.resolvePortPosition(n, candidate, side);
+      return true;
+    };
+    const auto resolveSide = [&](bool side, noodles::Vec2d* result) {
+      if (resolveVisible(side, port, result)) return true;
+      const auto& folded = side ? n.foldedOutputPinMap : n.foldedInputPinMap;
+      if (auto it = folded.find(port); it != folded.end()) {
+        return resolveVisible(side, it->second, result);
+      }
+      return false;
+    };
+
+    if (!resolveSide(isOutput, &anchor) &&
+        !resolveSide(!isOutput, &anchor)) {
+      anchor = nodeRenderer.resolvePortPosition(n, port, isOutput);
+    }
+    anchor[0] = isOutput ? n.position[0] + n.size[0] : n.position[0];
+    return anchor;
+  }
+
+  // Permanent relationship noodles use the same visible-row resolver as live
+  // drags, always on the output/right edge.
   noodles::Vec2d relationshipRowAnchor(const noodles::NodeData& n,
                                        const std::string& port) const {
-    const auto hasRow = [&](const std::string& p) {
-      return std::find(n.outputPins.begin(), n.outputPins.end(), p) !=
-             n.outputPins.end();
-    };
-    // Resolve the row this relationship originates from: its own visible row, its
-    // folded namespace header row, or (unreachable for a real link) the pin's
-    // best-effort resolve. We keep only this row's Y.
-    noodles::Vec2d anchor;
-    if (hasRow(port)) {
-      anchor = nodeRenderer.resolvePortPosition(n, port, /*isOutput=*/true);
-    } else if (auto it = n.foldedOutputPinMap.find(port);
-               it != n.foldedOutputPinMap.end() && hasRow(it->second)) {
-      anchor = nodeRenderer.resolvePortPosition(n, it->second, /*isOutput=*/true);
-    } else {
-      anchor = nodeRenderer.resolvePortPosition(n, port, /*isOutput=*/true);
-    }
-    // FORCE the X to the node's right edge (the output-side port-circle X). A
-    // relationship link's source is always the output side, so its noodle must
-    // leave from the right edge — never an interior/aggregate X. resolvePortPosition
-    // already returns the right edge on every reachable path here; forcing it is a
-    // no-op for those and a safety net against any path (dual mirror, synthetic
-    // handle, unknown-pin fallback) that could otherwise pull the start toward the
-    // node center. Y stays on the resolved row.
-    anchor[0] = n.position[0] + n.size[0];
-    return anchor;
+    return rowEdgeAnchor(n, port, /*isOutput=*/true);
   }
 
   // ── minimap (item 4) ──
@@ -1744,8 +1752,10 @@ struct GraphEditor::Impl {
               property.kind != GraphPropertyKind::Attribute) {
             continue;
           }
-          nit->second.originalInputPinTypes[propertyName] =
-              ComposeTypeText(property);
+          auto& pinTypes = property.direction == GraphPropertyDirection::Output
+                               ? nit->second.originalOutputPinTypes
+                               : nit->second.originalInputPinTypes;
+          pinTypes[propertyName] = ComposeTypeText(property);
           if (property.hasValue) {
             valueRows[nodeId][propertyName] = {
                 property.isScrubable, property.numericValue, property.type,
@@ -1777,8 +1787,11 @@ struct GraphEditor::Impl {
       bool nodeChanged = false;
       for (const GraphProperty& property : source.properties) {
         if (property.kind != GraphPropertyKind::Attribute) continue;
-        auto typeIt = node.originalInputPinTypes.find(property.name);
-        if (typeIt == node.originalInputPinTypes.end()) continue;
+        auto& pinTypes = property.direction == GraphPropertyDirection::Output
+                             ? node.originalOutputPinTypes
+                             : node.originalInputPinTypes;
+        auto typeIt = pinTypes.find(property.name);
+        if (typeIt == pinTypes.end()) continue;
         const std::string typeText = ComposeTypeText(property);
         if (typeIt->second != typeText) {
           typeIt->second = typeText;
@@ -1824,9 +1837,10 @@ struct GraphEditor::Impl {
 };
 
 // Rebuild the GraphModel from a plain snapshot, mapping document properties
-// onto noodles pin content the way the reference nodeFactory/pinUtils
-// do: attributes → input-side pins, relationships → output-side pins; attribute
-// connections become out→in data links; relationships become whole-node links.
+// onto noodles pin content the way the reference nodeFactory/pinUtils do:
+// input attributes → input-side pins, explicit output attributes and
+// relationships → output-side pins; attribute connections become out→in data
+// links and relationships become whole-node links.
 void GraphEditor::Impl::buildModel() {
   const std::string keepSelection = selectedNodeId;
   model.clear();
@@ -1856,11 +1870,17 @@ void GraphEditor::Impl::buildModel() {
         nd.originalOutputPinTypes[prop.name] = prop.type;  // "rel"
         nd.relationshipOutputPins.insert(prop.name);
         nd.orderedPinEntries.emplace_back("output", prop.name);
-      } else {  // "attribute"
-        nd.originalInputPins.push_back(prop.name);
+      } else {  // attribute: explicit output rows stay output-only
+        const bool isOutput =
+            prop.direction == GraphPropertyDirection::Output;
+        auto& pins = isOutput ? nd.originalOutputPins : nd.originalInputPins;
+        auto& pinTypes = isOutput ? nd.originalOutputPinTypes
+                                  : nd.originalInputPinTypes;
+        pins.push_back(prop.name);
         // TYPE slot carries "<type> · <value>"; the pin NAME stays pure.
-        nd.originalInputPinTypes[prop.name] = ComposeTypeText(prop);
-        nd.orderedPinEntries.emplace_back("input", prop.name);
+        pinTypes[prop.name] = ComposeTypeText(prop);
+        nd.orderedPinEntries.emplace_back(isOutput ? "output" : "input",
+                                          prop.name);
         if (prop.hasValue) {
           valueRows[src.id][prop.name] = {prop.isScrubable, prop.numericValue,
                                           prop.type, prop.displayValue};
@@ -1919,10 +1939,16 @@ void GraphEditor::Impl::buildModel() {
       link.targetPort = e.sourcePort;
       link.targetPropertyName = e.sourcePort;
       link.isRelationship = false;
-      // The output-side attribute mirrors an output port on its right edge.
+      // A legacy input-side attribute used as a data source mirrors an output
+      // port on its right edge. An explicit output-direction attribute already
+      // owns a typed output row and must not get a duplicate dual pin.
       if (auto it = model.nodes.find(link.sourceNodeId);
           it != model.nodes.end() && !link.sourcePort.empty()) {
-        it->second.dualPinNames.insert(link.sourcePort);
+        const auto& explicitOutputs = it->second.originalOutputPins;
+        if (std::find(explicitOutputs.begin(), explicitOutputs.end(),
+                      link.sourcePort) == explicitOutputs.end()) {
+          it->second.dualPinNames.insert(link.sourcePort);
+        }
       }
     }
     model.links.push_back(std::move(link));
@@ -2223,7 +2249,9 @@ void GraphEditor::pointerDown(double x, double y) {
 
     if (localY > n.layoutTitleHeight) {
       bool rowIsRel = false;
-      const std::string rowPin = s.rowPinAt(n, localY, &rowIsRel);
+      bool rowIsOutput = false;
+      const std::string rowPin =
+          s.rowPinAt(n, localY, &rowIsRel, &rowIsOutput);
       const int rowKind = s.rowKindOf(n, rowPin);
       if (!rowPin.empty() && (rowKind == 1 || rowKind == 2)) {
         // Group-header caret row: arm a fold toggle (fires on a no-move
@@ -2235,14 +2263,14 @@ void GraphEditor::pointerDown(double x, double y) {
       } else if (!rowPin.empty()) {
         const double edge = s.bandTouchWidth(n);
         // Outer connect bands take precedence over scrub: right = output side,
-        // left = input side. Starts a connection drag from that row's pin. The
-        // band is fingertip-sized (bandTouchWidth), clamped so the scrub/move
-        // middle always survives on narrow nodes.
+        // left = input side for input rows. Explicit output rows are output-only.
+        // The band is fingertip-sized (bandTouchWidth), clamped so the
+        // scrub/move middle always survives on narrow nodes.
         if (localX > n.size[0] - edge) {
           s.beginNewLinkDrag(hit, rowPin, /*isOutput=*/true);
           return;
         }
-        if (localX < edge) {
+        if (localX < edge && !rowIsOutput) {
           s.beginNewLinkDrag(hit, rowPin, /*isOutput=*/false);
           return;
         }
@@ -2703,6 +2731,13 @@ std::vector<GraphPinInfo> GraphEditor::nodePins(const std::string& id) const {
         tt != n.originalOutputPinTypes.end()) {
       info.typeText = tt->second;
     }
+    if (vn != impl_->valueRows.end()) {
+      if (auto vr = vn->second.find(name); vr != vn->second.end()) {
+        info.hasValue = true;
+        info.isScrubable = vr->second.scrubable;
+        info.value = vr->second.value;
+      }
+    }
     out.push_back(std::move(info));
   }
   // Dual pins (attribute connection sources) expose an extra output-side port.
@@ -2736,6 +2771,32 @@ std::vector<GraphLinkInfo> GraphEditor::links() const {
     out.push_back(std::move(info));
   }
   return out;
+}
+
+bool GraphEditor::activeLinkPreview(GraphLinkInfo* preview) const {
+  if (!preview || !impl_->dragPreviewActive || impl_->model.links.empty()) {
+    return false;
+  }
+  const noodles::LinkData& link = impl_->model.links.back();
+  if (!link.isDangling) return false;
+  preview->sourceNodeId = impl_->linkAnchorIsOutput
+                              ? impl_->linkAnchorNode
+                              : std::string();
+  preview->sourcePort = impl_->linkAnchorIsOutput
+                            ? impl_->linkAnchorPort
+                            : std::string();
+  preview->targetNodeId = impl_->linkAnchorIsOutput
+                              ? std::string()
+                              : impl_->linkAnchorNode;
+  preview->targetPort = impl_->linkAnchorIsOutput
+                            ? std::string()
+                            : impl_->linkAnchorPort;
+  preview->isRelationship = link.isRelationship;
+  preview->startX = link.start[0];
+  preview->startY = link.start[1];
+  preview->endX = link.end[0];
+  preview->endY = link.end[1];
+  return true;
 }
 
 bool GraphEditor::minimapVisible() const {

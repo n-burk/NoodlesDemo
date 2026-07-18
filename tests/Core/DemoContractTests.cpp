@@ -1,5 +1,5 @@
-#include "ContrivedGraphFixture.h"
-#include "ContrivedImageProcessor.h"
+#include "DemoGraphFixture.h"
+#include "DemoImageProcessor.h"
 
 #include <noodles/apple/GraphDocument.h>
 #include <noodles/apple/GraphEditor.h>
@@ -25,9 +25,10 @@ namespace na = noodles::apple;
 namespace {
 
 const na::GraphPinInfo* FindPin(const std::vector<na::GraphPinInfo>& pins,
-                                const std::string& name) {
+                                const std::string& name,
+                                bool isOutput = false) {
   for (const na::GraphPinInfo& pin : pins) {
-    if (pin.name == name && !pin.isOutput) return &pin;
+    if (pin.name == name && pin.isOutput == isOutput) return &pin;
   }
   return nullptr;
 }
@@ -57,8 +58,8 @@ na::GraphProperty* FindProperty(na::GraphSnapshot& snapshot,
 }
 
 std::uint64_t RenderHash(const na::GraphSnapshot& snapshot) {
-  return na::examples::ContrivedImageChecksum(
-      na::examples::RenderContrivedImage(snapshot, 128, 80));
+  return na::examples::DemoImageChecksum(
+      na::examples::RenderDemoImage(snapshot, 128, 80));
 }
 
 bool PropertyChangeAltersOutput(const na::GraphSnapshot& baseline,
@@ -76,7 +77,7 @@ bool PropertyChangeAltersOutput(const na::GraphSnapshot& baseline,
 }
 
 bool TestFixtureTopologyAndEditableBoolean() {
-  auto fixture = na::examples::CreateContrivedGraphFixture();
+  auto fixture = na::examples::CreateDemoGraphFixture();
   CHECK(fixture.document);
   CHECK(fixture.editor);
   CHECK(fixture.editor->nodeCount() == 4);
@@ -86,7 +87,26 @@ bool TestFixtureTopologyAndEditableBoolean() {
   const na::GraphSnapshot initial = fixture.document->snapshot(12.0);
   CHECK(FindProperty(initial, "/Demo/Noise", "noise:frequency"));
   CHECK(FindProperty(initial, "/Demo/Noise", "noise:amplitude"));
+  const na::GraphProperty* noiseOutput =
+      FindProperty(initial, "/Demo/Noise", "output");
+  CHECK(noiseOutput);
+  CHECK(noiseOutput->type == "image");
+  CHECK(noiseOutput->direction == na::GraphPropertyDirection::Output);
   CHECK(!FindProperty(initial, "/Demo/Source", "source:level"));
+
+  const auto noisePins = fixture.editor->nodePins("/Demo/Noise");
+  const na::GraphPinInfo* output = FindPin(noisePins, "output", true);
+  CHECK(output);
+  CHECK(output->typeText == "image");
+  CHECK(!FindPin(noisePins, "output", false));
+
+  int imageDataLinks = 0;
+  for (const na::GraphLinkInfo& link : fixture.editor->links()) {
+    if (link.isRelationship) continue;
+    CHECK(link.sourcePort == "output");
+    ++imageDataLinks;
+  }
+  CHECK(imageDataLinks == 2);
 
   const auto pins = fixture.editor->nodePins("/Demo/Display");
   const na::GraphPinInfo* visible = FindPin(pins, "visible");
@@ -119,13 +139,18 @@ bool TestFixtureTopologyAndEditableBoolean() {
 }
 
 bool TestFixtureHiddenSourceUsesPublicAddNodeSeam() {
-  auto fixture = na::examples::CreateContrivedGraphFixture();
+  auto fixture = na::examples::CreateDemoGraphFixture();
   CHECK(fixture.editor->nodeCount() == 4);
   CHECK(fixture.editor->addNodeAt("/Demo/Source", 320.0, 240.0));
   CHECK(fixture.editor->nodeCount() == 5);
 
   const na::GraphSnapshot visible = fixture.document->snapshot(12.0);
   CHECK(FindProperty(visible, "/Demo/Source", "source:level"));
+  const na::GraphProperty* sourceOutput =
+      FindProperty(visible, "/Demo/Source", "output");
+  CHECK(sourceOutput);
+  CHECK(sourceOutput->type == "image");
+  CHECK(sourceOutput->direction == na::GraphPropertyDirection::Output);
   double x = 0.0;
   double y = 0.0;
   CHECK(fixture.editor->nodePosition("/Demo/Source", &x, &y));
@@ -134,7 +159,7 @@ bool TestFixtureHiddenSourceUsesPublicAddNodeSeam() {
 }
 
 bool TestFixtureAnimatedScrubAuthorsAtDisplayFrame() {
-  auto fixture = na::examples::CreateContrivedGraphFixture();
+  auto fixture = na::examples::CreateDemoGraphFixture();
   const auto pins = fixture.editor->nodePins("/Demo/Grade");
   const na::GraphPinInfo* gain = FindPin(pins, "gain");
   CHECK(gain);
@@ -178,13 +203,13 @@ bool TestFixtureAnimatedScrubAuthorsAtDisplayFrame() {
   return true;
 }
 
-bool TestContrivedImageProcessorTracksGraphState() {
-  auto fixture = na::examples::CreateContrivedGraphFixture();
+bool TestDemoImageProcessorTracksGraphState() {
+  auto fixture = na::examples::CreateDemoGraphFixture();
   const na::GraphSnapshot baseline = fixture.document->snapshot(12.0);
-  const na::examples::ContrivedRgbaImage first =
-      na::examples::RenderContrivedImage(baseline, 128, 80);
-  const na::examples::ContrivedRgbaImage second =
-      na::examples::RenderContrivedImage(baseline, 128, 80);
+  const na::examples::DemoRgbaImage first =
+      na::examples::RenderDemoImage(baseline, 128, 80);
+  const na::examples::DemoRgbaImage second =
+      na::examples::RenderDemoImage(baseline, 128, 80);
   CHECK(!first.empty());
   CHECK(first.width == 128);
   CHECK(first.height == 80);
@@ -195,7 +220,7 @@ bool TestContrivedImageProcessorTracksGraphState() {
   }
 
   const std::uint64_t baselineHash =
-      na::examples::ContrivedImageChecksum(first);
+      na::examples::DemoImageChecksum(first);
   CHECK(baselineHash == RenderHash(baseline));
 
   // The fixture's animated gain is linearly evaluated by GraphDocument. The
@@ -212,19 +237,19 @@ bool TestContrivedImageProcessorTracksGraphState() {
   // Exercise the same authoring paths used by the native callbacks, not only
   // synthetic snapshots: scalar authoring, an atomic Boolean edit, and a
   // topology mutation must each change the next rendered snapshot.
-  auto valueFixture = na::examples::CreateContrivedGraphFixture();
+  auto valueFixture = na::examples::CreateDemoGraphFixture();
   CHECK(valueFixture.document->setAttributeValue(
       "/Demo/Noise", "noise:frequency", 6.75, 12.0));
   CHECK(RenderHash(valueFixture.document->snapshot(12.0)) != baselineHash);
 
-  auto toggleFixture = na::examples::CreateContrivedGraphFixture();
+  auto toggleFixture = na::examples::CreateDemoGraphFixture();
   CHECK(toggleFixture.document->setAttributeValue(
       "/Demo/Noise", "enabled", 0.0, 12.0));
   CHECK(RenderHash(toggleFixture.document->snapshot(12.0)) != baselineHash);
 
-  auto topologyFixture = na::examples::CreateContrivedGraphFixture();
+  auto topologyFixture = na::examples::CreateDemoGraphFixture();
   CHECK(topologyFixture.document->removeConnection(
-      "/Demo/Display", "surface", "/Demo/Grade", "mix"));
+      "/Demo/Display", "surface", "/Demo/Grade", "output"));
   CHECK(RenderHash(topologyFixture.document->snapshot(12.0)) != baselineHash);
 
   // Every processor control called out by the fixture contract participates
@@ -259,8 +284,8 @@ bool TestContrivedImageProcessorTracksGraphState() {
     const char* targetPort;
     bool relationship;
   } edgeCases[] = {
-      {"/Demo/Grade", "input", "/Demo/Noise", "noise:amplitude", false},
-      {"/Demo/Display", "surface", "/Demo/Grade", "mix", false},
+      {"/Demo/Grade", "input", "/Demo/Noise", "output", false},
+      {"/Demo/Display", "surface", "/Demo/Grade", "output", false},
       {"/Demo/Grade", "mask", "/Demo/Mask", "", true},
   };
   for (const auto& edgeCase : edgeCases) {
@@ -298,8 +323,8 @@ int main() {
        TestFixtureHiddenSourceUsesPublicAddNodeSeam},
       {"fixture_animated_scrub_at_display_frame",
        TestFixtureAnimatedScrubAuthorsAtDisplayFrame},
-      {"contrived_image_processor_tracks_graph_state",
-       TestContrivedImageProcessorTracksGraphState},
+      {"demo_image_processor_tracks_graph_state",
+       TestDemoImageProcessorTracksGraphState},
   };
 
   bool passed = true;

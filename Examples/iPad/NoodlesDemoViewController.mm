@@ -1,9 +1,9 @@
-#import "NoodlesAppleiPadDemoViewController.h"
+#import "NoodlesDemoViewController.h"
 
 #import <NoodlesApple/UIKit/NoodlesAppleGraphView.h>
 
-#include "../ContrivedGraphFixture.h"
-#include "../ContrivedImageProcessor.h"
+#include "../DemoGraphFixture.h"
+#include "../DemoImageProcessor.h"
 
 #include <noodles/apple/GraphEditor.h>
 #include <noodles/apple/InMemoryGraphDocument.h>
@@ -138,7 +138,7 @@ static UILabel *ControlLabel(NSString *text) {
 }
 
 static UIImage *ImageFromRgba(
-    const noodles::apple::examples::ContrivedRgbaImage &image) {
+    const noodles::apple::examples::DemoRgbaImage &image) {
   if (image.empty())
     return nil;
   const size_t rowBytes = static_cast<size_t>(image.width) * 4;
@@ -161,13 +161,13 @@ static UIImage *ImageFromRgba(
   return result;
 }
 
-@interface NoodlesAppleiPadDemoViewController ()
+@interface NoodlesDemoViewController ()
 - (void)refreshOutputImage;
 @end
 
-@implementation NoodlesAppleiPadDemoViewController {
+@implementation NoodlesDemoViewController {
   NSString *_assetsPath;
-  noodles::apple::examples::ContrivedGraphFixture _fixture;
+  noodles::apple::examples::DemoGraphFixture _fixture;
   DemoPencilCanvas *_canvas;
   NoodlesAppleGraphView *_graphView;
   UILabel *_statusLabel;
@@ -193,7 +193,7 @@ static UIImage *ImageFromRgba(
   _canvas = canvas;
   _displayFrame = 12.0;
 
-  _fixture = noodles::apple::examples::CreateContrivedGraphFixture();
+  _fixture = noodles::apple::examples::CreateDemoGraphFixture();
   _graphView = [[NoodlesAppleGraphView alloc] initWithFrame:canvas.bounds
                                                      editor:_fixture.editor
                                                  assetsPath:_assetsPath];
@@ -315,15 +315,15 @@ static UIImage *ImageFromRgba(
     [fitGraph.heightAnchor constraintEqualToConstant:30.0],
   ]];
 
-  __weak NoodlesAppleiPadDemoViewController *weakSelf = self;
+  __weak NoodlesDemoViewController *weakSelf = self;
   _graphView.onStatus = ^(NSString *message) {
-    NoodlesAppleiPadDemoViewController *controller = weakSelf;
+    NoodlesDemoViewController *controller = weakSelf;
     if (!controller)
       return;
     controller->_statusLabel.text = message.length > 0 ? message : @"Ready";
   };
   _graphView.onSelectionChanged = ^(NSString *nodeId) {
-    NoodlesAppleiPadDemoViewController *controller = weakSelf;
+    NoodlesDemoViewController *controller = weakSelf;
     if (!controller)
       return;
     controller->_selectionLabel.text =
@@ -335,17 +335,17 @@ static UIImage *ImageFromRgba(
         (void)nodeId;
         (void)attributeName;
         (void)live;
-        NoodlesAppleiPadDemoViewController *controller = weakSelf;
+        NoodlesDemoViewController *controller = weakSelf;
         if (controller)
           [controller refreshOutputImage];
       };
   _graphView.onTopologyEdited = ^{
-    NoodlesAppleiPadDemoViewController *controller = weakSelf;
+    NoodlesDemoViewController *controller = weakSelf;
     if (controller)
       [controller refreshOutputImage];
   };
   _graphView.onGraphStructureChanged = ^{
-    NoodlesAppleiPadDemoViewController *controller = weakSelf;
+    NoodlesDemoViewController *controller = weakSelf;
     if (controller)
       [controller refreshOutputImage];
   };
@@ -357,8 +357,8 @@ static UIImage *ImageFromRgba(
     return;
   const noodles::apple::GraphSnapshot snapshot =
       _fixture.document->snapshot(_displayFrame);
-  const noodles::apple::examples::ContrivedRgbaImage output =
-      noodles::apple::examples::RenderContrivedImage(snapshot, 640, 400);
+  const noodles::apple::examples::DemoRgbaImage output =
+      noodles::apple::examples::RenderDemoImage(snapshot, 640, 400);
   [_canvas setOutputImage:ImageFromRgba(output)];
 }
 
@@ -412,9 +412,9 @@ static UIImage *ImageFromRgba(
 - (void)viewDidAppear:(BOOL)animated {
   [super viewDidAppear:animated];
   if (!_didFrameGraph) {
-    __weak NoodlesAppleiPadDemoViewController *weakSelf = self;
+    __weak NoodlesDemoViewController *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleiPadDemoViewController *controller = weakSelf;
+      NoodlesDemoViewController *controller = weakSelf;
       if (controller && !controller->_didFrameGraph) {
         controller->_didFrameGraph =
             [controller->_graphView frameAllWithPadding:32.0];
