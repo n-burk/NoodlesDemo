@@ -1,0 +1,85 @@
+# NoodlesApple
+
+NoodlesApple is a reusable C++17/Objective-C++ host for interactive
+[`noodles`](https://github.com/facebookexperimental/noodles) node graphs on
+iPadOS and macOS. It supplies the application-facing pieces that the renderer
+deliberately does not own: an editable document seam, interaction controller,
+Apple GL views, resource plumbing, and runnable example applications.
+
+The core is host-agnostic and depends only on `noodles::noodles`. OpenUSD is an
+optional adapter, not part of the core API. The Inkwell iPad application uses
+that adapter while the public demos use an in-memory contrived graph, so both
+exercise the same layout, rendering, hit-testing, value editing, connection,
+folding, minimap, and gesture implementation.
+
+## Targets
+
+| CMake target | Purpose |
+| --- | --- |
+| `NoodlesApple::Core` | Graph DTO/document API plus the shared editor/controller |
+| `NoodlesApple::USD` | Optional source-embedded OpenUSD collector and mutation adapter |
+| `NoodlesApple::UIKit` | `CAEAGLLayer`/OpenGL ES 3 iPadOS view |
+| `NoodlesApple::AppKit` | `NSOpenGLView` macOS view |
+
+The UIKit and AppKit views render the same `GraphEditor`. Platform code only
+creates the GL context, translates native events, schedules frames, and
+forwards optional stylus misses to a background canvas.
+
+## Runnable demo surface
+
+Both example apps render the same five-node fixture (four initially visible and
+one host-addable Source) over the same generated landscape image. That image is
+produced by a shared C++ example processor from the graph snapshot, so live
+value edits, Boolean toggles, connection edits, and frame interpolation have
+visible output instead of changing the graph UI alone. The apps also expose
+controls for the shipping overlay defaults:
+
+- overlay opacity from 0.15 through 1.0, initially 0.5;
+- display-frame scrubbing from frame 0 through 24, including an interpolated
+  animated value;
+- host-driven node insertion through the public `addNodeAt` seam; and
+- a visible `noise:*` property group whose header can be folded independently.
+
+The graph itself demonstrates selection, movement, whole-node and property-group
+folding, scalar scrubbing, Boolean toggles, connection authoring and editing,
+minimap navigation, and fit-to-view layout. The iPad app additionally includes a
+drawing surface that makes sticky Pencil pass-through visible; the macOS app
+exercises mouse, scroll-pan, and trackpad magnification. Product hosts can wire
+the same add-node seam to their native external-drop API, as Inkwell does.
+
+## Supported and tested behavior
+
+The public Core and render suites additionally cover deterministic fresh and
+incremental layout, dynamic zoom limits, relationship and data reconnect /
+disconnect / cancellation, long-press graph removal without deleting the
+backing object, external document observation, current-frame authoring,
+touch-sized hit regions, minimap navigation, transparent compositing, and
+cached text following node drags. UIKit and AppKit compile/shell checks pin the
+native embedding APIs; runnable apps remain the platform-interaction smoke test.
+
+## Quick start
+
+Install a current iOS-capable Noodles package, then build the macOS demo:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=/path/to/noodles/install
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+For local source development, pass
+`-DNOODLES_APPLE_NOODLES_SOURCE_DIR=/path/to/noodles`. Installed consumers use
+`find_package(NoodlesApple CONFIG REQUIRED)` and link the namespaced targets.
+
+See [BUILDING.md](BUILDING.md) for iPadOS, install, and external-consumer
+commands. Maintainers should follow the coordinated dependency sequence in
+[RELEASING.md](RELEASING.md).
+
+## Distribution
+
+NoodlesApple is MIT licensed. Noodles is a separate MIT-licensed dependency;
+its font and third-party notices ship with the Noodles package. A source
+distribution must include this repository's `LICENSE` and declare a compatible
+Noodles package dependency. No Inkwell product assets or private fixtures are
+part of this package.

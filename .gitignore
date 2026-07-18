@@ -1,0 +1,6 @@
+/build*/
+/.cache/
+/.DS_Store
+*.xcresult
+DerivedData/
+compile_commands.json

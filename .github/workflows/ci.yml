@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      noodles_repository:
+        description: Repository containing the Apple/GLES-capable Noodles 1.1.x dependency
+        required: false
+        default: facebookexperimental/noodles
+      noodles_ref:
+        description: Noodles tag, branch, or commit to test
+        required: false
+        default: main
+
+env:
+  # Repository variables provide the CI/release dependency. Manual dispatch
+  # inputs override them. Upstream main is the real development fallback until
+  # an Apple/GLES-capable Noodles 1.1.x release exists; releases must override
+  # this with an immutable compatible tag or commit.
+  NOODLES_REPOSITORY: ${{ inputs.noodles_repository || vars.NOODLES_REPOSITORY || 'facebookexperimental/noodles' }}
+  NOODLES_REF: ${{ inputs.noodles_ref || vars.NOODLES_REF || 'main' }}
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.NOODLES_REPOSITORY }}
+          ref: ${{ env.NOODLES_REF }}
+          path: noodles-dependency
+      - name: Build and install Noodles dependency
+        run: |
+          cmake -S noodles-dependency -B noodles-build \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=OFF
+          cmake --build noodles-build --parallel
+          cmake --install noodles-build --prefix "$RUNNER_TEMP/noodles"
+      - name: Build, test, and install NoodlesApple
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/noodles" \
+            -DNOODLES_APPLE_BUILD_TESTS=ON \
+            -DNOODLES_APPLE_BUILD_EXAMPLES=ON
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+          cmake --install build --prefix "$RUNNER_TEMP/noodles-apple"
+      - name: Verify installed consumer
+        run: |
+          cmake -S tests/package -B package-consumer \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/noodles;$RUNNER_TEMP/noodles-apple"
+          cmake --build package-consumer --parallel
+          ./package-consumer/NoodlesApplePackageConsumer
+          ./package-consumer/NoodlesAppleAppKitPackageConsumer
+
+  ios-demo:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.NOODLES_REPOSITORY }}
+          ref: ${{ env.NOODLES_REF }}
+          path: noodles-dependency
+      - name: Build iPad demo for the simulator SDK
+        run: |
+          cmake -S . -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_ARCHITECTURES="$(uname -m)" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
+            -DNOODLES_APPLE_NOODLES_SOURCE_DIR="$GITHUB_WORKSPACE/noodles-dependency" \
+            -DNOODLES_APPLE_BUILD_EXAMPLES=ON \
+            -DNOODLES_APPLE_BUILD_TESTS=OFF
+          cmake --build build-ios --config Release \
+            --target NoodlesAppleiPadDemo --parallel
+      - name: Build iPad demo for the device SDK
+        run: |
+          cmake -S . -B build-ios-device -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
+            -DNOODLES_APPLE_NOODLES_SOURCE_DIR="$GITHUB_WORKSPACE/noodles-dependency" \
+            -DNOODLES_APPLE_BUILD_EXAMPLES=ON \
+            -DNOODLES_APPLE_BUILD_TESTS=OFF
+          cmake --build build-ios-device --config Release \
+            --target NoodlesAppleiPadDemo --parallel
