@@ -190,7 +190,6 @@ class GraphEvaluator {
                  const DemoRgbaImage* sourceImage, int outputWidth,
                  int outputHeight) {
     displayInput_ = ResolveInput(snapshot, "/Demo/Display", "surface", "image");
-    noiseInput_ = ResolveInput(snapshot, "/Demo/Noise", "input", "image");
     gradeInput_ = ResolveInput(snapshot, "/Demo/Grade", "input", "image");
     compositeBackground_ =
         ResolveInput(snapshot, "/Demo/Composite", "background", "image");
@@ -206,10 +205,9 @@ class GraphEvaluator {
     sourceEnabled_ = Toggle(snapshot, "/Demo/SourceImage", "enabled", true);
     noiseFrequency_ = Clamp(
         Number(snapshot, "/Demo/Noise", "noise:frequency", 2.5), 0.05, 24.0);
-    noiseStrength_ =
+    noiseAmplitude_ =
         Clamp(Number(snapshot, "/Demo/Noise", "noise:amplitude", 0.75), 0.0,
-              3.0) *
-        0.17;
+              2.0);
     noiseEnabled_ = Toggle(snapshot, "/Demo/Noise", "enabled", true);
     gradeGain_ = Clamp(Number(snapshot, "/Demo/Grade", "gain", 1.0), 0.0, 4.0);
     gradeMix_ = Clamp(Number(snapshot, "/Demo/Grade", "mix", 1.0), 0.0, 1.0);
@@ -346,16 +344,15 @@ class GraphEvaluator {
         break;
       }
       case DemoNode::Noise: {
-        const ImageSample input =
-            ImageNode(noiseInput_, u, v, activeNodes, cache);
-        if (!input.valid) break;
-        result = input;
-        if (noiseEnabled_) {
-          const double noise = ProceduralNoise(u, v, noiseFrequency_);
-          result.color = {input.color.r + noise * noiseStrength_,
-                          input.color.g + noise * noiseStrength_ * 0.82,
-                          input.color.b + noise * noiseStrength_ * 0.64};
+        if (!noiseEnabled_) {
+          result = {{0.0, 0.0, 0.0}, true};
+          break;
         }
+        const double noise =
+            Clamp(0.5 + ProceduralNoise(u, v, noiseFrequency_) * 0.5 *
+                            noiseAmplitude_,
+                  0.0, 1.0);
+        result = {{noise, noise * 0.88 + 0.04, noise * 0.72 + 0.10}, true};
         break;
       }
       case DemoNode::Grade: {
@@ -372,12 +369,22 @@ class GraphEvaluator {
             ImageNode(compositeBackground_, u, v, activeNodes, cache);
         const ImageSample foreground =
             ImageNode(compositeForeground_, u, v, activeNodes, cache);
-        const MaskSample mask =
-            MaskNode(compositeMask_, u, v, activeNodes, cache);
-        if (background.valid && foreground.valid && mask.valid) {
-          result = {Mix(background.color, foreground.color,
-                        Clamp(mask.value * compositeOpacity_, 0.0, 1.0)),
-                    true};
+        if (background.valid && !foreground.valid) {
+          result = background;
+          break;
+        }
+        if (!background.valid && foreground.valid) {
+          result = foreground;
+          break;
+        }
+        if (background.valid && foreground.valid) {
+          const MaskSample mask =
+              MaskNode(compositeMask_, u, v, activeNodes, cache);
+          const double maskValue = mask.valid ? mask.value : 1.0;
+          result = {
+              Mix(background.color, foreground.color,
+                  Clamp(maskValue * compositeOpacity_, 0.0, 1.0)),
+              true};
         }
         break;
       }
@@ -412,7 +419,6 @@ class GraphEvaluator {
   }
 
   DemoNode displayInput_ = DemoNode::Invalid;
-  DemoNode noiseInput_ = DemoNode::Invalid;
   DemoNode gradeInput_ = DemoNode::Invalid;
   DemoNode compositeBackground_ = DemoNode::Invalid;
   DemoNode compositeForeground_ = DemoNode::Invalid;
@@ -421,7 +427,7 @@ class GraphEvaluator {
   double sourceBias_ = 0.0;
   bool sourceEnabled_ = true;
   double noiseFrequency_ = 2.5;
-  double noiseStrength_ = 0.0;
+  double noiseAmplitude_ = 0.75;
   bool noiseEnabled_ = true;
   double gradeGain_ = 1.0;
   double gradeMix_ = 1.0;

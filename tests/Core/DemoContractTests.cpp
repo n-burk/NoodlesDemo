@@ -45,6 +45,14 @@ const na::GraphProperty* FindProperty(const na::GraphSnapshot& snapshot,
   return nullptr;
 }
 
+const na::GraphNode* FindNode(const na::GraphSnapshot& snapshot,
+                              const std::string& nodeId) {
+  for (const na::GraphNode& node : snapshot.nodes) {
+    if (node.id == nodeId) return &node;
+  }
+  return nullptr;
+}
+
 na::GraphProperty* FindProperty(na::GraphSnapshot& snapshot,
                                 const std::string& nodeId,
                                 const std::string& propertyName) {
@@ -125,6 +133,23 @@ bool RemoveEdge(na::GraphSnapshot* snapshot,
   return false;
 }
 
+bool RemoveRelationshipEdge(na::GraphSnapshot* snapshot,
+                            const std::string& sourceNodeId,
+                            const std::string& relationshipName,
+                            const std::string& targetNodeId) {
+  if (!snapshot) return false;
+  for (auto edge = snapshot->edges.begin(); edge != snapshot->edges.end();
+       ++edge) {
+    if (edge->isRelationship && edge->sourceNodeId == sourceNodeId &&
+        edge->sourcePort == relationshipName &&
+        edge->targetNodeId == targetNodeId && edge->targetPort.empty()) {
+      snapshot->edges.erase(edge);
+      return true;
+    }
+  }
+  return false;
+}
+
 bool HasTypedPort(const na::GraphSnapshot& snapshot,
                   const std::string& nodeId,
                   const std::string& propertyName,
@@ -141,13 +166,17 @@ bool TestFixtureTopologyAndEditableControls() {
   CHECK(fixture.document);
   CHECK(fixture.editor);
   CHECK(fixture.editor->nodeCount() == 6);
-  CHECK(fixture.editor->linkCount() == 6);
+  CHECK(fixture.editor->linkCount() == 5);
 
   const na::GraphSnapshot initial = fixture.document->snapshot(12.0);
   CHECK(initial.nodes.size() == 6);
-  CHECK(initial.edges.size() == 6);
+  CHECK(initial.edges.size() == 5);
   CHECK(FindProperty(initial, "/Demo/Noise", "noise:frequency"));
   CHECK(FindProperty(initial, "/Demo/Noise", "noise:amplitude"));
+  CHECK(!FindProperty(initial, "/Demo/Noise", "input"));
+  const na::GraphNode* noiseNode = FindNode(initial, "/Demo/Noise");
+  CHECK(noiseNode);
+  CHECK(noiseNode->schemaTypeName == "Generator");
 
   const na::GraphProperty* sourcePath =
       FindProperty(initial, "/Demo/SourceImage", "path");
@@ -177,8 +206,6 @@ bool TestFixtureTopologyAndEditableControls() {
   } typedPorts[] = {
       {"/Demo/SourceImage", "output", "image",
        na::GraphPropertyDirection::Output},
-      {"/Demo/Noise", "input", "image",
-       na::GraphPropertyDirection::Input},
       {"/Demo/Noise", "output", "image",
        na::GraphPropertyDirection::Output},
       {"/Demo/Grade", "input", "image",
@@ -212,9 +239,8 @@ bool TestFixtureTopologyAndEditableControls() {
     const char* outputNodeId;
     const char* outputPort;
   } expectedEdges[] = {
-      {"/Demo/Noise", "input", "/Demo/SourceImage", "output"},
       {"/Demo/Grade", "input", "/Demo/Noise", "output"},
-      {"/Demo/Composite", "background", "/Demo/Noise", "output"},
+      {"/Demo/Composite", "background", "/Demo/SourceImage", "output"},
       {"/Demo/Composite", "foreground", "/Demo/Grade", "output"},
       {"/Demo/Display", "surface", "/Demo/Composite", "output"},
   };
@@ -243,7 +269,7 @@ bool TestFixtureTopologyAndEditableControls() {
       ++dataLinks;
     }
   }
-  CHECK(dataLinks == 5);
+  CHECK(dataLinks == 4);
   CHECK(relationshipLinks == 1);
 
   const na::GraphProperty* radius =
@@ -503,9 +529,9 @@ bool TestDemoImageProcessorTracksGraphState() {
     const char* targetPort;
     bool relationship;
   } edgeCases[] = {
-      {"/Demo/Noise", "input", "/Demo/SourceImage", "output", false},
       {"/Demo/Grade", "input", "/Demo/Noise", "output", false},
-      {"/Demo/Composite", "background", "/Demo/Noise", "output", false},
+      {"/Demo/Composite", "background", "/Demo/SourceImage", "output",
+       false},
       {"/Demo/Composite", "foreground", "/Demo/Grade", "output", false},
       {"/Demo/Composite", "mask", "/Demo/Mask", "", true},
       {"/Demo/Display", "surface", "/Demo/Composite", "output", false},
@@ -528,6 +554,57 @@ bool TestDemoImageProcessorTracksGraphState() {
     CHECK(removed);
     CHECK(RenderHash(disconnected) != baselineHash);
   }
+  return true;
+}
+
+bool TestCompositeFallbackSemantics() {
+  auto fixture = na::examples::CreateDemoGraphFixture();
+  const na::GraphSnapshot baseline = fixture.document->snapshot(12.0);
+
+  na::GraphSnapshot directSource = baseline;
+  directSource.edges.push_back(
+      {"/Demo/Display", "surface", "/Demo/SourceImage", "output", false});
+  na::GraphSnapshot directGrade = baseline;
+  directGrade.edges.push_back(
+      {"/Demo/Display", "surface", "/Demo/Grade", "output", false});
+
+  na::GraphSnapshot backgroundOnly = baseline;
+  CHECK(RemoveEdge(&backgroundOnly, "/Demo/Composite", "foreground",
+                   "/Demo/Grade", "output"));
+
+  // Compare against the exact Source Image output, not merely against a
+  // non-black checksum. A disconnected foreground must not invalidate or
+  // darken a valid Composite background.
+  CHECK(RenderHash(backgroundOnly) == RenderHash(directSource));
+  CHECK(RenderHash(backgroundOnly) != RenderHash(baseline));
+
+  na::GraphSnapshot foregroundOnly = baseline;
+  CHECK(RemoveEdge(&foregroundOnly, "/Demo/Composite", "background",
+                   "/Demo/SourceImage", "output"));
+  CHECK(RenderHash(foregroundOnly) == RenderHash(directGrade));
+
+  // A missing mask behaves as full white when both image inputs exist.
+  na::GraphSnapshot unmasked = baseline;
+  CHECK(RemoveRelationshipEdge(&unmasked, "/Demo/Composite", "mask",
+                               "/Demo/Mask"));
+  CHECK(RenderHash(unmasked) == RenderHash(directGrade));
+  na::GraphProperty* opacity =
+      FindProperty(unmasked, "/Demo/Composite", "opacity");
+  CHECK(opacity);
+  opacity->numericValue = 0.0;
+  CHECK(RenderHash(unmasked) == RenderHash(directSource));
+
+  // With neither image input, Composite is invalid and Display uses the same
+  // deterministic no-signal result as a disconnected surface.
+  na::GraphSnapshot noCompositeImages = baseline;
+  CHECK(RemoveEdge(&noCompositeImages, "/Demo/Composite", "background",
+                   "/Demo/SourceImage", "output"));
+  CHECK(RemoveEdge(&noCompositeImages, "/Demo/Composite", "foreground",
+                   "/Demo/Grade", "output"));
+  na::GraphSnapshot noDisplayInput = baseline;
+  CHECK(RemoveEdge(&noDisplayInput, "/Demo/Display", "surface",
+                   "/Demo/Composite", "output"));
+  CHECK(RenderHash(noCompositeImages) == RenderHash(noDisplayInput));
   return true;
 }
 
@@ -561,11 +638,11 @@ bool TestMissingInputAndCycleAreDeterministic() {
   const na::GraphSnapshot baseline = fixture.document->snapshot(12.0);
   const std::uint64_t baselineHash = RenderHash(baseline);
 
-  // Noise is required by both Composite branches. Removing its source makes
-  // the Display resolve to the deterministic no-signal image.
+  // With Display disconnected there is no image root, so the evaluator emits
+  // the deterministic no-signal image.
   na::GraphSnapshot missingInput = baseline;
-  CHECK(RemoveEdge(&missingInput, "/Demo/Noise", "input",
-                   "/Demo/SourceImage", "output"));
+  CHECK(RemoveEdge(&missingInput, "/Demo/Display", "surface",
+                   "/Demo/Composite", "output"));
   const na::examples::DemoRgbaImage missingFirst =
       na::examples::RenderDemoImage(missingInput, 128, 80);
   const na::examples::DemoRgbaImage missingSecond =
@@ -574,13 +651,14 @@ bool TestMissingInputAndCycleAreDeterministic() {
   CHECK(missingFirst.pixels == missingSecond.pixels);
   CHECK(na::examples::DemoImageChecksum(missingFirst) != baselineHash);
 
-  // The most recently authored source wins. Appending Grade.output as the
-  // Noise input creates Noise -> Grade -> Noise and must terminate safely.
+  // The most recently authored source wins. Feeding Composite.output back into
+  // Grade.input creates Grade -> Composite -> Grade. The cycle must terminate
+  // safely while Composite preserves its independent Source Image background.
   na::GraphSnapshot cyclic = baseline;
   na::GraphEdge cycleEdge;
-  cycleEdge.sourceNodeId = "/Demo/Noise";
+  cycleEdge.sourceNodeId = "/Demo/Grade";
   cycleEdge.sourcePort = "input";
-  cycleEdge.targetNodeId = "/Demo/Grade";
+  cycleEdge.targetNodeId = "/Demo/Composite";
   cycleEdge.targetPort = "output";
   cyclic.edges.push_back(cycleEdge);
   const na::examples::DemoRgbaImage cycleFirst =
@@ -590,7 +668,11 @@ bool TestMissingInputAndCycleAreDeterministic() {
   CHECK(!cycleFirst.empty());
   CHECK(cycleFirst.pixels == cycleSecond.pixels);
   CHECK(na::examples::DemoImageChecksum(cycleFirst) != baselineHash);
-  CHECK(cycleFirst.pixels == missingFirst.pixels);
+  na::GraphSnapshot backgroundOnly = baseline;
+  CHECK(RemoveEdge(&backgroundOnly, "/Demo/Composite", "foreground",
+                   "/Demo/Grade", "output"));
+  CHECK(cycleFirst.pixels ==
+        na::examples::RenderDemoImage(backgroundOnly, 128, 80).pixels);
   return true;
 }
 
@@ -611,6 +693,9 @@ bool TestDirectDisplayIgnoresDisconnectedDownstreamControls() {
   const std::uint64_t directNoiseHash =
       RenderHash(noiseFixture.document->snapshot(12.0));
   const ControlChange noiseDownstream[] = {
+      {"/Demo/SourceImage", "brightness", 0.4},
+      {"/Demo/SourceImage", "bias", 0.3},
+      {"/Demo/SourceImage", "enabled", 0.0},
       {"/Demo/Grade", "gain", 2.4},
       {"/Demo/Grade", "mix", 0.05},
       {"/Demo/Mask", "radius", 0.18},
@@ -671,6 +756,7 @@ int main() {
        TestFixtureAnimatedScrubAuthorsAtDisplayFrame},
       {"demo_image_processor_tracks_graph_state",
        TestDemoImageProcessorTracksGraphState},
+      {"composite_fallback_semantics", TestCompositeFallbackSemantics},
       {"external_source_image_changes_output",
        TestExternalSourceImageChangesOutput},
       {"missing_input_and_cycle_are_deterministic",

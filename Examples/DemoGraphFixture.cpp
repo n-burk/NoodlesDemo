@@ -83,9 +83,8 @@ DemoGraphFixture CreateDemoGraphFixture() {
             Toggle("enabled", true),
             Port("output", "image", GraphPropertyDirection::Output)}));
   snapshot.nodes.push_back(
-      Node("/Demo/Noise", "Noise", "Processor",
-           {Port("input", "image", GraphPropertyDirection::Input),
-            Number("noise:frequency", "float", 2.5),
+      Node("/Demo/Noise", "Noise", "Generator",
+           {Number("noise:frequency", "float", 2.5),
             Number("noise:amplitude", "float", 0.75), Toggle("enabled", true),
             Port("output", "image", GraphPropertyDirection::Output)}));
   snapshot.nodes.push_back(
@@ -111,11 +110,9 @@ DemoGraphFixture CreateDemoGraphFixture() {
   // Connection edges use document-authoring orientation: the input property is
   // the source endpoint and points at the upstream output property.
   snapshot.edges.push_back(
-      {"/Demo/Noise", "input", "/Demo/SourceImage", "output", false});
-  snapshot.edges.push_back(
       {"/Demo/Grade", "input", "/Demo/Noise", "output", false});
   snapshot.edges.push_back(
-      {"/Demo/Composite", "background", "/Demo/Noise", "output", false});
+      {"/Demo/Composite", "background", "/Demo/SourceImage", "output", false});
   snapshot.edges.push_back(
       {"/Demo/Composite", "foreground", "/Demo/Grade", "output", false});
   snapshot.edges.push_back(

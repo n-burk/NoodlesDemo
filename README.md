@@ -33,9 +33,8 @@ the same six-node, topology-driven image pipeline, with every node initially
 visible:
 
 ```text
-Source Image.output:image -> Noise.input:image
 Noise.output:image        -> Grade.input:image
-Noise.output:image        -> Composite.background:image
+Source Image.output:image -> Composite.background:image
 Grade.output:image        -> Composite.foreground:image
 Composite.mask:relationship -> Ellipse Mask
 Composite.output:image    -> Display.surface:image
