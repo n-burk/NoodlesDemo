@@ -56,12 +56,21 @@ static void InstallMainMenu(NSApplication *application) {
   application.mainMenu = mainMenu;
 }
 
+static void InstallApplicationIcon(NSApplication *application) {
+  NSURL *iconURL = [NSBundle.mainBundle URLForResource:@"NoodlesDemo"
+                                         withExtension:@"icns"];
+  NSImage *icon = iconURL ? [[NSImage alloc] initWithContentsOfURL:iconURL]
+                          : nil;
+  if (icon) application.applicationIconImage = icon;
+}
+
 int main(int argc, const char *argv[]) {
   (void)argc;
   (void)argv;
   @autoreleasepool {
     NSApplication *application = NSApplication.sharedApplication;
     application.activationPolicy = NSApplicationActivationPolicyRegular;
+    InstallApplicationIcon(application);
     InstallMainMenu(application);
     NoodlesDemoAppDelegate *delegate = [[NoodlesDemoAppDelegate alloc] init];
     application.delegate = delegate;

@@ -22,8 +22,9 @@ folding, minimap, and gesture implementation.
 | `NoodlesApple::AppKit` | `NSOpenGLView` macOS view |
 
 The UIKit and AppKit views render the same `GraphEditor`. Platform code only
-creates the GL context, translates native events, schedules frames, and
-forwards optional stylus misses to a background canvas.
+creates the GL context, translates native events, schedules frames, and can
+optionally forward stylus misses to a background canvas. Without such a target,
+Pencil behaves like touch across the graph surface.
 
 ## Runnable demo surface
 
@@ -57,9 +58,9 @@ The apps also expose controls for the shipping overlay defaults:
 
 The graph itself demonstrates selection, movement, whole-node and property-group
 folding, scalar scrubbing, Boolean toggles, connection authoring and editing,
-minimap navigation, and fit-to-view layout. The iPad app additionally includes a
-drawing surface that makes sticky Pencil pass-through visible; the macOS app
-exercises mouse, scroll-pan, and trackpad magnification.
+minimap navigation, and fit-to-view layout. The iPad demo treats Pencil and
+touch alike for graph editing; the macOS app exercises mouse, scroll-pan, and
+trackpad magnification.
 
 ## Supported and tested behavior
 

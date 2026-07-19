@@ -17,19 +17,15 @@ static UIColor *DemoBackgroundColor() {
   return [UIColor colorWithRed:0.055 green:0.065 blue:0.085 alpha:1.0];
 }
 
-// A deliberately small drawing surface proves the public Pencil policy without
-// introducing an application-specific ink engine. The overlay forwards the
-// original UITouch, including force/tilt/coalesced event identity, to this
-// view.
-@interface DemoPencilCanvas : UIView <NoodlesApplePencilForwardingTarget>
+// The generated output sits underneath the transparent graph overlay. This
+// view deliberately does not adopt the optional Pencil-forwarding protocol, so
+// Pencil and touch both remain graph-editing inputs in this demo.
+@interface DemoOutputCanvas : UIView
 - (void)setOutputImage:(UIImage *)image;
 @end
 
-@implementation DemoPencilCanvas {
+@implementation DemoOutputCanvas {
   UIImageView *_outputView;
-  CAShapeLayer *_inkLayer;
-  UIBezierPath *_activePath;
-  __weak UITouch *_activeTouch;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -42,68 +38,11 @@ static UIColor *DemoBackgroundColor() {
   _outputView.clipsToBounds = YES;
   _outputView.userInteractionEnabled = NO;
   [self addSubview:_outputView];
-
-  // Keep the Pencil surface between the generated image and the transparent
-  // graph overlay: the demo remains a real drawing host, not an image-only
-  // graph sample.
-  _inkLayer = [CAShapeLayer layer];
-  _inkLayer.fillColor = UIColor.clearColor.CGColor;
-  _inkLayer.strokeColor = [UIColor colorWithRed:0.35 green:0.76 blue:1.0 alpha:0.72].CGColor;
-  _inkLayer.lineWidth = 3.0;
-  _inkLayer.lineCap = kCALineCapRound;
-  _inkLayer.lineJoin = kCALineJoinRound;
-  [self.layer addSublayer:_inkLayer];
   return self;
 }
 
 - (void)setOutputImage:(UIImage *)image {
   _outputView.image = image;
-}
-
-- (void)layoutSubviews {
-  [super layoutSubviews];
-  _inkLayer.frame = self.bounds;
-}
-
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-  (void)event;
-  UITouch *touch = touches.anyObject;
-  if (!touch || touch.type != UITouchTypePencil || _activeTouch) return;
-  _activeTouch = touch;
-  _activePath = [UIBezierPath bezierPath];
-  [_activePath moveToPoint:[touch locationInView:self]];
-  _inkLayer.path = _activePath.CGPath;
-}
-
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-  if (![touches containsObject:_activeTouch] || !_activePath) return;
-  NSArray<UITouch *> *samples = [event coalescedTouchesForTouch:_activeTouch];
-  if (samples.count == 0) samples = @[ _activeTouch ];
-  for (UITouch *sample in samples) {
-    [_activePath addLineToPoint:[sample locationInView:self]];
-  }
-  _inkLayer.path = _activePath.CGPath;
-}
-
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-  [self touchesMoved:touches withEvent:event];
-  if ([touches containsObject:_activeTouch]) {
-    _activeTouch = nil;
-    _activePath = nil;
-  }
-}
-
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-  (void)event;
-  if ([touches containsObject:_activeTouch]) {
-    _activeTouch = nil;
-    _activePath = nil;
-  }
-}
-
-- (void)noodlesAppleCancelForwardedPencilGesture {
-  _activeTouch = nil;
-  _activePath = nil;
 }
 
 @end
@@ -158,7 +97,7 @@ static UIImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &ima
 @implementation NoodlesDemoViewController {
   NSString *_assetsPath;
   noodles::apple::examples::DemoGraphFixture _fixture;
-  DemoPencilCanvas *_canvas;
+  DemoOutputCanvas *_canvas;
   NoodlesAppleGraphView *_graphView;
   UILabel *_statusLabel;
   UILabel *_selectionLabel;
@@ -178,7 +117,7 @@ static UIImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &ima
 }
 
 - (void)loadView {
-  DemoPencilCanvas *canvas = [[DemoPencilCanvas alloc] initWithFrame:CGRectZero];
+  DemoOutputCanvas *canvas = [[DemoOutputCanvas alloc] initWithFrame:CGRectZero];
   self.view = canvas;
   _canvas = canvas;
   _displayFrame = 12.0;
@@ -188,11 +127,10 @@ static UIImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &ima
                                                      editor:_fixture.editor
                                                  assetsPath:_assetsPath];
   _graphView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-  _graphView.pencilForwardingTarget = canvas;
   [canvas addSubview:_graphView];
 
   _statusLabel = HudLabel(12.0, UIFontWeightMedium);
-  _statusLabel.text = @"Tap Source Image path to choose · Pencil draws through empty space";
+  _statusLabel.text = @"Tap Source Image path to choose · Pencil and touch edit the graph";
   [canvas addSubview:_statusLabel];
 
   _selectionLabel = HudLabel(12.0, UIFontWeightRegular);

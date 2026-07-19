@@ -25,9 +25,9 @@ NS_ASSUME_NONNULL_BEGIN
 ///
 /// The view owns only the GL drawable and platform input lifecycle. The
 /// supplied editor and its GraphDocument own graph data and edits. Finger
-/// gestures always drive the graph. A Pencil which begins on graph content
-/// drives the graph; a Pencil which begins on empty space is forwarded,
-/// unchanged and for the whole touch lifetime, to pencilForwardingTarget.
+/// gestures always drive the graph. Pencil does the same unless it begins on
+/// empty space and a pencilForwardingTarget can be resolved; that optional
+/// route forwards the original touch unchanged for its whole lifetime.
 ///
 /// This header intentionally requires Objective-C++ at construction sites: the
 /// editor is shared with other public NoodlesApple adapters through
@@ -55,7 +55,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Optional explicit Pencil sink. If nil, resolvePencilForwardingTarget
 /// searches the current window for the first view adopting the forwarding
-/// protocol.
+/// protocol. If no target resolves, Pencil behaves like touch everywhere.
 @property(nonatomic, weak, nullable)
     UIView<NoodlesApplePencilForwardingTarget> *pencilForwardingTarget;
 

@@ -584,8 +584,17 @@ NSString *ToNSString(const std::string &value) {
     if (touch.type != UITouchTypePencil)
       continue;
     const CGPoint point = [touch locationInView:self];
-    if (!_pencilGraphActive && !_panOwnsEditor && !_pinchOwnsEditor &&
-        [self hitsGraphElementAt:point]) {
+    const BOOL graphRouteAvailable =
+        !_pencilGraphActive && !_panOwnsEditor && !_pinchOwnsEditor;
+    UIView<NoodlesApplePencilForwardingTarget> *forwardingTarget = nil;
+    const BOOL hitsGraph = [self hitsGraphElementAt:point];
+    if (graphRouteAvailable && !hitsGraph) {
+      forwardingTarget = [self resolvePencilForwardingTarget];
+    }
+    // A configured canvas keeps the sticky Pencil pass-through policy. With
+    // no canvas, Pencil owns the same graph pointer stream as touch, including
+    // empty-space panning and selection clearing.
+    if (graphRouteAvailable && (hitsGraph || !forwardingTarget)) {
       _graphPencilTouch = touch;
       _pencilGraphActive = YES;
       _graphPencilLastPoint = point;
