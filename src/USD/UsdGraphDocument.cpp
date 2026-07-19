@@ -1,11 +1,10 @@
 // The iOS OpenUSD archive enables PXR's Python declarations without shipping
 // Python headers. This implementation is intentionally C++-only.
 #ifdef PXR_PYTHON_SUPPORT_ENABLED
-#  undef PXR_PYTHON_SUPPORT_ENABLED
+#undef PXR_PYTHON_SUPPORT_ENABLED
 #endif
 
 #include <noodles/apple/UsdGraphDocument.h>
-
 #include <pxr/base/gf/half.h>
 #include <pxr/base/gf/vec2d.h>
 #include <pxr/base/gf/vec2f.h>
@@ -70,7 +69,11 @@ std::string FormatComponent(double value) {
 std::string TruncateDisplay(const std::string& value,
                             std::size_t maximum = 24) {
   if (value.size() <= maximum) return value;
-  return value.substr(0, maximum) + "\xE2\x80\xA6";
+  std::size_t end = maximum;
+  while (end > 0 && (static_cast<unsigned char>(value[end]) & 0xC0U) == 0x80U) {
+    --end;
+  }
+  return value.substr(0, end) + "\xE2\x80\xA6";
 }
 
 void CaptureAttributeValue(const UsdAttribute& attribute,
@@ -141,19 +144,22 @@ void CaptureAttributeValue(const UsdAttribute& attribute,
     TfToken value;
     if (attribute.Get(&value, time)) {
       property.hasValue = true;
-      property.displayValue = TruncateDisplay(value.GetString());
+      property.stringValue = value.GetString();
+      property.displayValue = TruncateDisplay(property.stringValue);
     }
   } else if (valueType == SdfValueTypeNames->String) {
     std::string value;
     if (attribute.Get(&value, time)) {
       property.hasValue = true;
-      property.displayValue = TruncateDisplay(value);
+      property.stringValue = value;
+      property.displayValue = TruncateDisplay(property.stringValue);
     }
   } else if (valueType == SdfValueTypeNames->Asset) {
     SdfAssetPath value;
     if (attribute.Get(&value, time)) {
       property.hasValue = true;
-      property.displayValue = TruncateDisplay(value.GetAssetPath());
+      property.stringValue = value.GetAssetPath();
+      property.displayValue = TruncateDisplay(property.stringValue);
     }
   }
 }
@@ -209,15 +215,13 @@ GraphSnapshot CollectGraph(
                           UsdGraphDocument::PropertyFilterUse::EdgeTopology)) {
         continue;
       }
-      accumulators[sourceId].ports.push_back(
-          {name, GraphPortKind::Connection});
+      accumulators[sourceId].ports.push_back({name, GraphPortKind::Connection});
       isSource = true;
       for (const SdfPath& source : sources) {
         const std::string targetId = source.GetPrimPath().GetString();
         const std::string targetPort =
             source.IsPropertyPath() ? source.GetName() : std::string();
-        graph.edges.push_back(
-            {sourceId, name, targetId, targetPort, false});
+        graph.edges.push_back({sourceId, name, targetId, targetPort, false});
         accumulators[targetId];
       }
     }
@@ -241,8 +245,7 @@ GraphSnapshot CollectGraph(
       for (const UsdProperty& usdProperty : prim.GetProperties()) {
         GraphProperty property;
         property.name = usdProperty.GetName().GetString();
-        if (UsdRelationship relationship =
-                usdProperty.As<UsdRelationship>()) {
+        if (UsdRelationship relationship = usdProperty.As<UsdRelationship>()) {
           property.kind = GraphPropertyKind::Relationship;
           if (propertyFilter &&
               !propertyFilter(node.id, node.schemaTypeName, property.name,
@@ -264,9 +267,9 @@ GraphSnapshot CollectGraph(
           property.connected = attribute.HasAuthoredConnections();
           CaptureAttributeValue(attribute, property, time);
           if (editabilityPolicy && property.isScrubable) {
-            property.isScrubable = editabilityPolicy(
-                node.id, node.schemaTypeName, property.name, property.type,
-                true);
+            property.isScrubable =
+                editabilityPolicy(node.id, node.schemaTypeName, property.name,
+                                  property.type, true);
           }
         } else {
           continue;
@@ -330,9 +333,9 @@ struct UsdGraphDocument::Impl : public TfWeakBase {
     stopListening();
     stage = value;
     if (stage) {
-      noticeKey = TfNotice::Register(TfCreateWeakPtr(this),
-                                     &Impl::onObjectsChanged,
-                                     UsdStageWeakPtr(stage));
+      noticeKey =
+          TfNotice::Register(TfCreateWeakPtr(this), &Impl::onObjectsChanged,
+                             UsdStageWeakPtr(stage));
       listening = true;
     }
   }
@@ -357,7 +360,8 @@ struct UsdGraphDocument::Impl : public TfWeakBase {
     for (const SdfPath& path : notice.GetResyncedPaths()) {
       if (path.IsPropertyPath() && path.GetName() == PositionToken()) {
         notify({GraphDocumentChange::Kind::NodePosition,
-                path.GetPrimPath().GetString(), {}});
+                path.GetPrimPath().GetString(),
+                {}});
       } else {
         structural = true;
       }
@@ -405,8 +409,7 @@ void UsdGraphDocument::setPropertyFilter(PropertyFilter filter) {
 
 GraphSnapshot UsdGraphDocument::snapshot(double displayFrame) const {
   return CollectGraph(impl_->stage, UsdTimeCode(displayFrame),
-                      impl_->attributeEditabilityPolicy,
-                      impl_->propertyFilter);
+                      impl_->attributeEditabilityPolicy, impl_->propertyFilter);
 }
 
 bool UsdGraphDocument::containsNode(const std::string& nodeId) const {
@@ -415,13 +418,12 @@ bool UsdGraphDocument::containsNode(const std::string& nodeId) const {
          static_cast<bool>(impl_->stage->GetPrimAtPath(path));
 }
 
-bool UsdGraphDocument::authorRelationship(
-    const std::string& sourceNodeId, const std::string& relationshipName,
-    const std::string& targetNodeId) {
+bool UsdGraphDocument::authorRelationship(const std::string& sourceNodeId,
+                                          const std::string& relationshipName,
+                                          const std::string& targetNodeId) {
   SdfPath sourcePath, targetPath;
   if (!ValidPrimPath(sourceNodeId, &sourcePath) ||
-      !ValidPrimPath(targetNodeId, &targetPath) ||
-      relationshipName.empty() ||
+      !ValidPrimPath(targetNodeId, &targetPath) || relationshipName.empty() ||
       !SdfPath::IsValidNamespacedIdentifier(relationshipName) ||
       !IsEditable(impl_->stage)) {
     return false;
@@ -463,13 +465,12 @@ bool UsdGraphDocument::authorRelationship(
   return added;
 }
 
-bool UsdGraphDocument::removeRelationship(
-    const std::string& sourceNodeId, const std::string& relationshipName,
-    const std::string& targetNodeId) {
+bool UsdGraphDocument::removeRelationship(const std::string& sourceNodeId,
+                                          const std::string& relationshipName,
+                                          const std::string& targetNodeId) {
   SdfPath sourcePath, targetPath;
   if (!ValidPrimPath(sourceNodeId, &sourcePath) ||
-      !ValidPrimPath(targetNodeId, &targetPath) ||
-      relationshipName.empty() ||
+      !ValidPrimPath(targetNodeId, &targetPath) || relationshipName.empty() ||
       !SdfPath::IsValidNamespacedIdentifier(relationshipName) ||
       !IsEditable(impl_->stage)) {
     return false;
@@ -504,9 +505,10 @@ bool UsdGraphDocument::removeRelationship(
   return removed;
 }
 
-bool UsdGraphDocument::authorConnection(
-    const std::string& inputNodeId, const std::string& inputPort,
-    const std::string& outputNodeId, const std::string& outputPort) {
+bool UsdGraphDocument::authorConnection(const std::string& inputNodeId,
+                                        const std::string& inputPort,
+                                        const std::string& outputNodeId,
+                                        const std::string& outputPort) {
   SdfPath inputPath, outputPath;
   if (!ValidPrimPath(inputNodeId, &inputPath) ||
       !ValidPrimPath(outputNodeId, &outputPath) || inputPort.empty() ||
@@ -531,9 +533,10 @@ bool UsdGraphDocument::authorConnection(
   return attribute.AddConnection(target);
 }
 
-bool UsdGraphDocument::removeConnection(
-    const std::string& inputNodeId, const std::string& inputPort,
-    const std::string& outputNodeId, const std::string& outputPort) {
+bool UsdGraphDocument::removeConnection(const std::string& inputNodeId,
+                                        const std::string& inputPort,
+                                        const std::string& outputNodeId,
+                                        const std::string& outputPort) {
   SdfPath inputPath, outputPath;
   if (!ValidPrimPath(inputNodeId, &inputPath) ||
       !ValidPrimPath(outputNodeId, &outputPath) || inputPort.empty() ||
@@ -566,11 +569,11 @@ bool UsdGraphDocument::setNodePosition(const std::string& nodeId, double x,
   SdfChangeBlock block;
   UsdAttribute position = prim.GetAttribute(PositionToken());
   if (!position) {
-    position = prim.CreateAttribute(PositionToken(), SdfValueTypeNames->Float2,
-                                    true);
+    position =
+        prim.CreateAttribute(PositionToken(), SdfValueTypeNames->Float2, true);
   }
-  return position && position.Set(
-                         GfVec2f(static_cast<float>(x), static_cast<float>(y)));
+  return position &&
+         position.Set(GfVec2f(static_cast<float>(x), static_cast<float>(y)));
 }
 
 bool UsdGraphDocument::clearNodePosition(const std::string& nodeId) {
@@ -584,9 +587,9 @@ bool UsdGraphDocument::clearNodePosition(const std::string& nodeId) {
   return prim.RemoveProperty(PositionToken());
 }
 
-bool UsdGraphDocument::setAttributeValue(
-    const std::string& nodeId, const std::string& attributeName, double value,
-    double displayFrame) {
+bool UsdGraphDocument::setAttributeValue(const std::string& nodeId,
+                                         const std::string& attributeName,
+                                         double value, double displayFrame) {
   SdfPath path;
   if (!ValidPrimPath(nodeId, &path) || attributeName.empty() ||
       !SdfPath::IsValidNamespacedIdentifier(attributeName) ||
@@ -625,6 +628,44 @@ bool UsdGraphDocument::setAttributeValue(
     return setIfChanged(static_cast<unsigned>(rounded < 0 ? 0 : rounded));
   }
   if (type == SdfValueTypeNames->Bool) return setIfChanged(value >= 0.5);
+  return false;
+}
+
+bool UsdGraphDocument::setStringAttributeValue(const std::string& nodeId,
+                                               const std::string& attributeName,
+                                               const std::string& value,
+                                               double displayFrame) {
+  SdfPath path;
+  if (!ValidPrimPath(nodeId, &path) || attributeName.empty() ||
+      !SdfPath::IsValidNamespacedIdentifier(attributeName) ||
+      !IsEditable(impl_->stage)) {
+    return false;
+  }
+  const UsdPrim prim = impl_->stage->GetPrimAtPath(path);
+  if (!prim) return false;
+  const UsdAttribute attribute = prim.GetAttribute(TfToken(attributeName));
+  if (!attribute) return false;
+  const SdfValueTypeName type = attribute.GetTypeName();
+  const UsdTimeCode time = attribute.GetNumTimeSamples() > 0
+                               ? UsdTimeCode(displayFrame)
+                               : UsdTimeCode::Default();
+  SdfChangeBlock block;
+  if (type == SdfValueTypeNames->String) {
+    std::string old;
+    if (attribute.Get(&old, time) && old == value) return false;
+    return attribute.Set(value, time);
+  }
+  if (type == SdfValueTypeNames->Token) {
+    const TfToken next(value);
+    TfToken old;
+    if (attribute.Get(&old, time) && old == next) return false;
+    return attribute.Set(next, time);
+  }
+  if (type == SdfValueTypeNames->Asset) {
+    SdfAssetPath old;
+    if (attribute.Get(&old, time) && old.GetAssetPath() == value) return false;
+    return attribute.Set(SdfAssetPath(value), time);
+  }
   return false;
 }
 

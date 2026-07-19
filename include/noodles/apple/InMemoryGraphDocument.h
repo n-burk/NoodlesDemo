@@ -54,6 +54,10 @@ class InMemoryGraphDocument final : public GraphDocument {
   bool setAttributeValue(const std::string& nodeId,
                          const std::string& attributeName, double value,
                          double displayFrame) override;
+  bool setStringAttributeValue(const std::string& nodeId,
+                               const std::string& attributeName,
+                               const std::string& value,
+                               double displayFrame) override;
   ObserverToken addObserver(Observer observer) override;
   void removeObserver(ObserverToken token) override;
 

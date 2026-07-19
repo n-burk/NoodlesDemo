@@ -10,7 +10,8 @@
 namespace noodles::apple {
 
 // Platform hooks only. Persistence/model semantics remain in GraphDocument;
-// UIKit/AppKit shells only schedule rendering, selection UI, and edit envelopes.
+// UIKit/AppKit shells only schedule rendering, selection UI, and edit
+// envelopes.
 struct GraphEditDelegate {
   std::function<void()> beginEdit;
   std::function<void()> endEdit;
@@ -31,6 +32,13 @@ struct GraphEditDelegate {
   std::function<void(const std::string& nodeId,
                      const std::string& attributeName, bool live)>
       attributeEdited;
+  // A no-move middle-row tap on a display-only attribute. This requests host
+  // UI (for example an asset picker); it is not a document edit and therefore
+  // does not open the beginEdit/endEdit envelope. Kept last so adding this hook
+  // does not disturb positional aggregate initializers for older delegates.
+  std::function<void(const std::string& nodeId,
+                     const std::string& attributeName)>
+      attributeActivated;
 };
 
 struct GraphPinInfo {
@@ -121,11 +129,14 @@ class GraphEditor {
   bool nodeSize(const std::string& id, double* w, double* h) const;
   std::vector<GraphPinInfo> nodePins(const std::string& id) const;
   std::vector<GraphLinkInfo> links() const;
+  // Returns the transient noodle shown during connection authoring/reconnect.
+  // This is useful to hosts that expose drag state through accessibility and
+  // keeps preview geometry testable without a GL readback.
+  bool activeLinkPreview(GraphLinkInfo* preview) const;
 
   bool minimapVisible() const;
   bool minimapRect(double* x, double* y, double* w, double* h) const;
-  bool minimapPointToWorld(double sx, double sy, double* wx,
-                           double* wy) const;
+  bool minimapPointToWorld(double sx, double sy, double* wx, double* wy) const;
   void viewToGraph(double vx, double vy, double* gx, double* gy) const;
   bool hitsGraphElementAt(double x, double y) const;
 

@@ -25,9 +25,9 @@ NS_ASSUME_NONNULL_BEGIN
 ///
 /// The view owns only the GL drawable and platform input lifecycle. The
 /// supplied editor and its GraphDocument own graph data and edits. Finger
-/// gestures always drive the graph. A Pencil which begins on graph content
-/// drives the graph; a Pencil which begins on empty space is forwarded,
-/// unchanged and for the whole touch lifetime, to pencilForwardingTarget.
+/// gestures always drive the graph. Pencil does the same unless it begins on
+/// empty space and a pencilForwardingTarget can be resolved; that optional
+/// route forwards the original touch unchanged for its whole lifetime.
 ///
 /// This header intentionally requires Objective-C++ at construction sites: the
 /// editor is shared with other public NoodlesApple adapters through
@@ -36,12 +36,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 #ifdef __cplusplus
 - (instancetype)initWithFrame:(CGRect)frame
-                       editor:
-                           (std::shared_ptr<noodles::apple::GraphEditor>)editor
+                       editor:(std::shared_ptr<noodles::apple::GraphEditor>)editor
                    assetsPath:(NSString *)assetsPath NS_DESIGNATED_INITIALIZER;
 
-- (instancetype)initWithEditor:
-                    (std::shared_ptr<noodles::apple::GraphEditor>)editor
+- (instancetype)initWithEditor:(std::shared_ptr<noodles::apple::GraphEditor>)editor
                     assetsPath:(NSString *)assetsPath;
 
 /// The exact editor supplied at initialization.
@@ -57,15 +55,14 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Optional explicit Pencil sink. If nil, resolvePencilForwardingTarget
 /// searches the current window for the first view adopting the forwarding
-/// protocol.
+/// protocol. If no target resolves, Pencil behaves like touch everywhere.
 @property(nonatomic, weak, nullable)
     UIView<NoodlesApplePencilForwardingTarget> *pencilForwardingTarget;
 
 /// Override to provide an application-specific target lookup. The default first
 /// returns pencilForwardingTarget, then recursively searches the current
 /// window.
-- (nullable UIView<NoodlesApplePencilForwardingTarget> *)
-    resolvePencilForwardingTarget;
+- (nullable UIView<NoodlesApplePencilForwardingTarget> *)resolvePencilForwardingTarget;
 
 /// Cancel either active Pencil route: a stream forwarded to the drawing target
 /// or a graph-owned pointer stream. A graph value scrub receives its terminal
@@ -86,10 +83,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// GraphEditor conveniences kept here so Swift/Objective-C hosts do not need a
 /// C++ façade for common overlay controls.
 - (void)setOverlayOpacity:(float)opacity;
-- (void)setClearColorRed:(float)red
-                   green:(float)green
-                    blue:(float)blue
-                   alpha:(float)alpha;
+- (void)setClearColorRed:(float)red green:(float)green blue:(float)blue alpha:(float)alpha;
 - (void)setValueScrubEnabled:(BOOL)enabled;
 - (void)setDisplayFrame:(double)frame;
 - (NSString *)selectedNodeId;
@@ -106,8 +100,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, nullable) void (^onBeginEdit)(void);
 @property(nonatomic, copy, nullable) void (^onEndEdit)(void);
 @property(nonatomic, copy, nullable) void (^onStatus)(NSString *message);
-@property(nonatomic, copy, nullable) void (^onSelectionChanged)
-    (NSString *nodeId);
+@property(nonatomic, copy, nullable) void (^onSelectionChanged)(NSString *nodeId);
+/// A stationary middle-row tap on a display-only attribute. Hosts may present
+/// contextual UI such as an asset picker; no document edit has occurred yet.
+@property(nonatomic, copy, nullable) void (^onAttributeActivated)
+    (NSString *nodeId, NSString *attributeName);
 /// A successful editor-authored topology edit, delivered synchronously inside
 /// the corresponding onBeginEdit/onEndEdit envelope.
 @property(nonatomic, copy, nullable) void (^onTopologyEdited)(void);

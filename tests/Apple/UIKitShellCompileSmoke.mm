@@ -27,6 +27,10 @@ void NoodlesAppleCompileUIKitShellAPI() {
   NoodlesAppleCompileSmokePencilTarget *target =
       [[NoodlesAppleCompileSmokePencilTarget alloc] initWithFrame:CGRectZero];
   view.pencilForwardingTarget = target;
+  view.onAttributeActivated = ^(NSString *nodeId, NSString *attributeName) {
+    (void)nodeId;
+    (void)attributeName;
+  };
   [view setOverlayOpacity:0.75f];
   [view setClearColorRed:0 green:0 blue:0 alpha:0];
   [view setValueScrubEnabled:YES];

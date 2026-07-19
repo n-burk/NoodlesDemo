@@ -34,12 +34,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 #ifdef __cplusplus
 - (instancetype)initWithFrame:(NSRect)frame
-                       editor:
-                           (std::shared_ptr<noodles::apple::GraphEditor>)editor
+                       editor:(std::shared_ptr<noodles::apple::GraphEditor>)editor
                    assetsPath:(NSString *)assetsPath NS_DESIGNATED_INITIALIZER;
 
-- (instancetype)initWithEditor:
-                    (std::shared_ptr<noodles::apple::GraphEditor>)editor
+- (instancetype)initWithEditor:(std::shared_ptr<noodles::apple::GraphEditor>)editor
                     assetsPath:(NSString *)assetsPath;
 
 - (std::shared_ptr<noodles::apple::GraphEditor>)graphEditor;
@@ -47,8 +45,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithFrame:(NSRect)frame NS_UNAVAILABLE;
 - (instancetype)initWithFrame:(NSRect)frame
-                  pixelFormat:(nullable NSOpenGLPixelFormat *)format
-    NS_UNAVAILABLE;
+                  pixelFormat:(nullable NSOpenGLPixelFormat *)format NS_UNAVAILABLE;
 - (instancetype)initWithCoder:(NSCoder *)coder NS_UNAVAILABLE;
 
 @property(nonatomic, copy, readonly) NSString *assetsPath;
@@ -59,10 +56,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)renderNow;
 
 - (void)setOverlayOpacity:(float)opacity;
-- (void)setClearColorRed:(float)red
-                   green:(float)green
-                    blue:(float)blue
-                   alpha:(float)alpha;
+- (void)setClearColorRed:(float)red green:(float)green blue:(float)blue alpha:(float)alpha;
 - (void)setValueScrubEnabled:(BOOL)enabled;
 - (void)setDisplayFrame:(double)frame;
 - (NSString *)selectedNodeId;
@@ -78,8 +72,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, nullable) void (^onBeginEdit)(void);
 @property(nonatomic, copy, nullable) void (^onEndEdit)(void);
 @property(nonatomic, copy, nullable) void (^onStatus)(NSString *message);
-@property(nonatomic, copy, nullable) void (^onSelectionChanged)
-    (NSString *nodeId);
+@property(nonatomic, copy, nullable) void (^onSelectionChanged)(NSString *nodeId);
+/// A stationary middle-row tap on a display-only attribute. Hosts may present
+/// contextual UI such as an asset picker; no document edit has occurred yet.
+@property(nonatomic, copy, nullable) void (^onAttributeActivated)
+    (NSString *nodeId, NSString *attributeName);
 /// A successful editor-authored topology edit, delivered synchronously inside
 /// the corresponding onBeginEdit/onEndEdit envelope.
 @property(nonatomic, copy, nullable) void (^onTopologyEdited)(void);

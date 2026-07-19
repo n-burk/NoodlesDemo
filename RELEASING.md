@@ -16,7 +16,7 @@ tag or commit for the compatible Noodles 1.1.x dependency.
 3. Set `NOODLES_REPOSITORY` and `NOODLES_REF` to that published dependency and
    run NoodlesApple CI from a clean clone. It must pass Core/render/AppKit
    tests, both installed-package consumers, and the iPad simulator demo build.
-4. Launch the macOS and iPad demos and confirm the same contrived graph supports
+4. Launch the macOS and iPad demos and confirm the same demo graph supports
    selection, movement, folding, value editing, connections, pan/zoom, and the
    minimap. Confirm the generated image remains visible beneath the overlay and
    changes live for scalar scrubs, Boolean toggles, display-frame changes, and

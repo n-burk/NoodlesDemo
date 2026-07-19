@@ -11,6 +11,7 @@ namespace noodles::apple {
 // Plain, persistence-agnostic data consumed by GraphEditor. A GraphDocument may
 // be backed by the reference in-memory model or an application's own storage.
 enum class GraphPropertyKind { Attribute, Relationship };
+enum class GraphPropertyDirection { Input, Output };
 enum class GraphPortKind { Connection, Relationship };
 
 struct GraphPort {
@@ -29,6 +30,16 @@ struct GraphProperty {
   bool isScrubable = false;
   double numericValue = 0.0;
   std::string displayValue;
+
+  // Attribute rows default to input-side presentation for compatibility with
+  // existing document adapters. Output attributes are rendered as typed,
+  // output-only rows on the node's right edge. Relationships remain output
+  // rows regardless of this value.
+  GraphPropertyDirection direction = GraphPropertyDirection::Input;
+
+  // Exact, untruncated value for token/string/asset attributes. displayValue
+  // remains presentation-only and may be shortened to keep nodes compact.
+  std::string stringValue;
 };
 
 struct GraphNode {
@@ -101,8 +112,18 @@ class GraphDocument {
                                double y) = 0;
   virtual bool clearNodePosition(const std::string& nodeId) = 0;
   virtual bool setAttributeValue(const std::string& nodeId,
-                                 const std::string& attributeName,
-                                 double value, double displayFrame) = 0;
+                                 const std::string& attributeName, double value,
+                                 double displayFrame) = 0;
+  virtual bool setStringAttributeValue(const std::string& nodeId,
+                                       const std::string& attributeName,
+                                       const std::string& value,
+                                       double displayFrame) {
+    (void)nodeId;
+    (void)attributeName;
+    (void)value;
+    (void)displayFrame;
+    return false;
+  }
 
   // Observers may run on the thread that changed the backing model. GraphEditor
   // only queues their data and applies it from processPendingDocumentChanges().

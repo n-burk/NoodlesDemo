@@ -38,7 +38,7 @@ ctest --test-dir build --output-on-failure
 cmake -S . -B build-macos -G Xcode \
   -DCMAKE_PREFIX_PATH=/tmp/noodles-install \
   -DNOODLES_APPLE_BUILD_EXAMPLES=ON
-cmake --build build-macos --config Debug --target NoodlesAppleMacDemo
+cmake --build build-macos --config Debug --target NoodlesDemo
 ```
 
 ## iPadOS demo
@@ -56,7 +56,7 @@ cmake -S . -B build-ios -G Xcode \
   -DNOODLES_APPLE_NOODLES_SOURCE_DIR=/path/to/noodles \
   -DNOODLES_APPLE_BUILD_EXAMPLES=ON \
   -DNOODLES_APPLE_BUILD_TESTS=OFF
-cmake --build build-ios --config Debug --target NoodlesAppleiPadDemo
+cmake --build build-ios --config Debug --target NoodlesDemo
 ```
 
 ## Optional OpenUSD adapter

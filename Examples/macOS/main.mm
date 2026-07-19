@@ -1,19 +1,19 @@
 #import <AppKit/AppKit.h>
 
-#import "NoodlesAppleMacDemoViewController.h"
+#import "NoodlesDemoViewController.h"
 
-@interface NoodlesAppleMacDemoAppDelegate : NSObject <NSApplicationDelegate>
+@interface NoodlesDemoAppDelegate : NSObject <NSApplicationDelegate>
 @property(nonatomic, strong) NSWindow *window;
 @end
 
-@implementation NoodlesAppleMacDemoAppDelegate
+@implementation NoodlesDemoAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
   (void)notification;
   NSString *assets = [NSBundle.mainBundle.resourcePath
       stringByAppendingPathComponent:@"noodles-assets"];
-  NoodlesAppleMacDemoViewController *controller =
-      [[NoodlesAppleMacDemoViewController alloc] initWithAssetsPath:assets];
+  NoodlesDemoViewController *controller =
+      [[NoodlesDemoViewController alloc] initWithAssetsPath:assets];
   self.window = [[NSWindow alloc]
       initWithContentRect:NSMakeRect(0, 0, 1200, 760)
                 styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
@@ -21,7 +21,7 @@
                           NSWindowStyleMaskResizable
                   backing:NSBackingStoreBuffered
                     defer:NO];
-  self.window.title = @"NoodlesApple Contrived Graph";
+  self.window.title = @"NoodlesDemo";
   self.window.contentViewController = controller;
   [self.window center];
   [self.window makeKeyAndOrderFront:nil];
@@ -46,15 +46,22 @@ static void InstallMainMenu(NSApplication *application) {
       [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
   [mainMenu addItem:applicationItem];
 
-  NSMenu *applicationMenu =
-      [[NSMenu alloc] initWithTitle:@"NoodlesApple Mac Demo"];
+  NSMenu *applicationMenu = [[NSMenu alloc] initWithTitle:@"NoodlesDemo"];
   NSMenuItem *quitItem =
-      [[NSMenuItem alloc] initWithTitle:@"Quit NoodlesApple Mac Demo"
+      [[NSMenuItem alloc] initWithTitle:@"Quit NoodlesDemo"
                                  action:@selector(terminate:)
                           keyEquivalent:@"q"];
   [applicationMenu addItem:quitItem];
   applicationItem.submenu = applicationMenu;
   application.mainMenu = mainMenu;
+}
+
+static void InstallApplicationIcon(NSApplication *application) {
+  NSURL *iconURL = [NSBundle.mainBundle URLForResource:@"NoodlesDemo"
+                                         withExtension:@"icns"];
+  NSImage *icon = iconURL ? [[NSImage alloc] initWithContentsOfURL:iconURL]
+                          : nil;
+  if (icon) application.applicationIconImage = icon;
 }
 
 int main(int argc, const char *argv[]) {
@@ -63,9 +70,9 @@ int main(int argc, const char *argv[]) {
   @autoreleasepool {
     NSApplication *application = NSApplication.sharedApplication;
     application.activationPolicy = NSApplicationActivationPolicyRegular;
+    InstallApplicationIcon(application);
     InstallMainMenu(application);
-    NoodlesAppleMacDemoAppDelegate *delegate =
-        [[NoodlesAppleMacDemoAppDelegate alloc] init];
+    NoodlesDemoAppDelegate *delegate = [[NoodlesDemoAppDelegate alloc] init];
     application.delegate = delegate;
     [application run];
   }

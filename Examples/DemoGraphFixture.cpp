@@ -1,4 +1,4 @@
-#include "ContrivedGraphFixture.h"
+#include "DemoGraphFixture.h"
 
 #include <noodles/apple/GraphDocument.h>
 #include <noodles/apple/GraphEditor.h>
@@ -34,11 +34,31 @@ GraphProperty Toggle(std::string name, bool value) {
   return property;
 }
 
+GraphProperty Asset(std::string name, std::string value,
+                    std::string displayValue) {
+  GraphProperty property;
+  property.name = std::move(name);
+  property.type = "asset";
+  property.hasValue = true;
+  property.stringValue = std::move(value);
+  property.displayValue = std::move(displayValue);
+  return property;
+}
+
 GraphProperty Relationship(std::string name) {
   GraphProperty property;
   property.name = std::move(name);
   property.kind = GraphPropertyKind::Relationship;
   property.type = "rel";
+  return property;
+}
+
+GraphProperty Port(std::string name, std::string type,
+                   GraphPropertyDirection direction) {
+  GraphProperty property;
+  property.name = std::move(name);
+  property.type = std::move(type);
+  property.direction = direction;
   return property;
 }
 
@@ -52,49 +72,58 @@ GraphNode Node(std::string id, std::string name, std::string type,
   return node;
 }
 
-} // namespace
+}  // namespace
 
-ContrivedGraphFixture CreateContrivedGraphFixture() {
+DemoGraphFixture CreateDemoGraphFixture() {
   GraphSnapshot snapshot;
+  snapshot.nodes.push_back(
+      Node("/Demo/SourceImage", "Source Image", "Generator",
+           {Asset("path", "", "Built-in Landscape"),
+            Number("brightness", "float", 1.0), Number("bias", "float", 0.0),
+            Toggle("enabled", true),
+            Port("output", "image", GraphPropertyDirection::Output)}));
   snapshot.nodes.push_back(
       Node("/Demo/Noise", "Noise", "Generator",
            {Number("noise:frequency", "float", 2.5),
-            Number("noise:amplitude", "float", 0.75),
-            Toggle("enabled", true)}));
-  snapshot.nodes.push_back(Node(
-      "/Demo/Grade", "Color Grade", "Processor",
-      {Number("input", "color3f", 0.25, false), Number("gain", "float", 1.2),
-       Number("mix", "float", 0.8), Relationship("mask")}));
+            Number("noise:amplitude", "float", 0.75), Toggle("enabled", true),
+            Port("output", "image", GraphPropertyDirection::Output)}));
+  snapshot.nodes.push_back(
+      Node("/Demo/Grade", "Color Grade", "Processor",
+           {Port("input", "image", GraphPropertyDirection::Input),
+            Number("gain", "float", 1.2), Number("mix", "float", 0.8),
+            Port("output", "image", GraphPropertyDirection::Output)}));
+  snapshot.nodes.push_back(
+      Node("/Demo/Composite", "Composite", "Processor",
+           {Port("background", "image", GraphPropertyDirection::Input),
+            Port("foreground", "image", GraphPropertyDirection::Input),
+            Relationship("mask"), Number("opacity", "float", 1.0),
+            Port("output", "image", GraphPropertyDirection::Output)}));
   snapshot.nodes.push_back(
       Node("/Demo/Display", "Display", "Output",
-           {Number("surface", "color3f", 0.5, false),
+           {Port("surface", "image", GraphPropertyDirection::Input),
             Number("exposure", "float", 0.0), Toggle("visible", true)}));
   snapshot.nodes.push_back(
       Node("/Demo/Mask", "Ellipse Mask", "Shape",
-           {Number("radius", "float2", 0.65, false),
-            Number("feather", "float", 0.12),
+           {Number("radius", "float", 0.65), Number("feather", "float", 0.12),
             Toggle("invert", false)}));
-  // Kept deliberately unpositioned and unconnected: GraphDocument visibility
-  // rules hide it until a demo's Add Source control calls GraphEditor::addNodeAt.
-  snapshot.nodes.push_back(
-      Node("/Demo/Source", "Source", "Generator",
-           {Number("source:level", "float", 1.0),
-            Number("source:bias", "float", 0.0), Toggle("enabled", true)}));
 
   // Connection edges use document-authoring orientation: the input property is
   // the source endpoint and points at the upstream output property.
   snapshot.edges.push_back(
-      {"/Demo/Grade", "input", "/Demo/Noise", "noise:amplitude", false});
+      {"/Demo/Grade", "input", "/Demo/Noise", "output", false});
   snapshot.edges.push_back(
-      {"/Demo/Display", "surface", "/Demo/Grade", "mix", false});
-  snapshot.edges.push_back({"/Demo/Grade", "mask", "/Demo/Mask", "", true});
+      {"/Demo/Composite", "background", "/Demo/SourceImage", "output", false});
+  snapshot.edges.push_back(
+      {"/Demo/Composite", "foreground", "/Demo/Grade", "output", false});
+  snapshot.edges.push_back(
+      {"/Demo/Composite", "mask", "/Demo/Mask", "", true});
+  snapshot.edges.push_back(
+      {"/Demo/Display", "surface", "/Demo/Composite", "output", false});
 
   auto document = std::make_shared<InMemoryGraphDocument>(std::move(snapshot));
-  // The four initially visible nodes are connected and deliberately have no
-  // stored positions. Both demos therefore exercise the same deterministic
-  // fresh-layout path a host sees when it first opens a graph; subsequent drags
-  // persist normally. /Demo/Source is the hidden add-node fixture described
-  // above.
+  // All six nodes are connected and deliberately have no stored positions.
+  // Both demos therefore exercise the same deterministic fresh-layout path a
+  // host sees when it first opens a graph; subsequent drags persist normally.
   // The animated gain row proves that both demos author at displayFrame rather
   // than accidentally replacing its default value.
   document->setTimeSample("/Demo/Grade", "gain", 0.0, 0.8);
@@ -109,4 +138,4 @@ ContrivedGraphFixture CreateContrivedGraphFixture() {
   return {std::move(document), std::move(editor)};
 }
 
-} // namespace noodles::apple::examples
+}  // namespace noodles::apple::examples

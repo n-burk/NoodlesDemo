@@ -14,7 +14,7 @@ Inkwell application globals and UI notifications.
   own GL contexts. They must drive the same `GraphEditor` implementation.
 - Product-specific cache invalidation, undo, notifications, and Pencil canvas
   forwarding policy remain in the consuming application adapter.
-- The iPad and macOS demos use the same contrived in-memory graph fixture and
+- The iPad and macOS demos use the same in-memory demo graph fixture and
   the same renderer configuration as the shipping integration.
 
 ## Build and test

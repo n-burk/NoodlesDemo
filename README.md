@@ -8,7 +8,7 @@ Apple GL views, resource plumbing, and runnable example applications.
 
 The core is host-agnostic and depends only on `noodles::noodles`. OpenUSD is an
 optional adapter, not part of the core API. The Inkwell iPad application uses
-that adapter while the public demos use an in-memory contrived graph, so both
+that adapter while the public demos use an in-memory demo graph, so both
 exercise the same layout, rendering, hit-testing, value editing, connection,
 folding, minimap, and gesture implementation.
 
@@ -22,30 +22,48 @@ folding, minimap, and gesture implementation.
 | `NoodlesApple::AppKit` | `NSOpenGLView` macOS view |
 
 The UIKit and AppKit views render the same `GraphEditor`. Platform code only
-creates the GL context, translates native events, schedules frames, and
-forwards optional stylus misses to a background canvas.
+creates the GL context, translates native events, schedules frames, and can
+optionally forward stylus misses to a background canvas. Without such a target,
+Pencil behaves like touch across the graph surface.
 
 ## Runnable demo surface
 
-Both example apps render the same five-node fixture (four initially visible and
-one host-addable Source) over the same generated landscape image. That image is
-produced by a shared C++ example processor from the graph snapshot, so live
-value edits, Boolean toggles, connection edits, and frame interpolation have
-visible output instead of changing the graph UI alone. The apps also expose
-controls for the shipping overlay defaults:
+The runnable macOS and iPadOS products are both named NoodlesDemo. They render
+the same six-node, topology-driven image pipeline, with every node initially
+visible:
+
+[![Watch the NoodlesDemo graph editor demo](media/demo-poster.jpg)](media/demo.mp4)
+
+[Watch the 39-second NoodlesDemo video](media/demo.mp4).
+
+```text
+Noise.output:image        -> Grade.input:image
+Source Image.output:image -> Composite.background:image
+Grade.output:image        -> Composite.foreground:image
+Composite.mask:relationship -> Ellipse Mask
+Composite.output:image    -> Display.surface:image
+```
+
+A shared C++ example processor evaluates the current graph snapshot from the
+Display input, so live value edits, Boolean toggles, connection edits, and frame
+interpolation visibly change the output rather than changing the graph UI alone.
+Image data noodles leave explicit right-side `output` rows whose displayed type
+is `image`, rather than appearing to originate from a node's scalar controls.
+The Source Image node also exposes an `asset`-typed `path` row: tapping its
+middle opens the native image browser, decodes the selected file off the main
+thread, and replaces the built-in landscape input.
+The apps also expose controls for the shipping overlay defaults:
 
 - overlay opacity from 0.15 through 1.0, initially 0.5;
 - display-frame scrubbing from frame 0 through 24, including an interpolated
   animated value;
-- host-driven node insertion through the public `addNodeAt` seam; and
 - a visible `noise:*` property group whose header can be folded independently.
 
 The graph itself demonstrates selection, movement, whole-node and property-group
 folding, scalar scrubbing, Boolean toggles, connection authoring and editing,
-minimap navigation, and fit-to-view layout. The iPad app additionally includes a
-drawing surface that makes sticky Pencil pass-through visible; the macOS app
-exercises mouse, scroll-pan, and trackpad magnification. Product hosts can wire
-the same add-node seam to their native external-drop API, as Inkwell does.
+minimap navigation, and fit-to-view layout. The iPad demo treats Pencil and
+touch alike for graph editing; the macOS app exercises mouse, scroll-pan, and
+trackpad magnification.
 
 ## Supported and tested behavior
 

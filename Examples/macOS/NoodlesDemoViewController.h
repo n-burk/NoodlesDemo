@@ -1,12 +1,12 @@
-#import <UIKit/UIKit.h>
+#import <AppKit/AppKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface NoodlesAppleiPadDemoViewController : UIViewController
+@interface NoodlesDemoViewController : NSViewController
 - (instancetype)initWithAssetsPath:(NSString *)assetsPath
     NS_DESIGNATED_INITIALIZER;
 - (instancetype)initWithCoder:(NSCoder *)coder NS_UNAVAILABLE;
-- (instancetype)initWithNibName:(nullable NSString *)nibNameOrNil
+- (instancetype)initWithNibName:(nullable NSNibName)nibNameOrNil
                          bundle:(nullable NSBundle *)nibBundleOrNil
     NS_UNAVAILABLE;
 @end

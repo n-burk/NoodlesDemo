@@ -72,6 +72,16 @@ ig::GraphProperty Display(std::string name, std::string type,
   return property;
 }
 
+ig::GraphProperty Port(std::string name, std::string type,
+                       ig::GraphPropertyDirection direction) {
+  ig::GraphProperty property;
+  property.name = std::move(name);
+  property.kind = ig::GraphPropertyKind::Attribute;
+  property.type = std::move(type);
+  property.direction = direction;
+  return property;
+}
+
 ig::GraphProperty Relationship(std::string name) {
   ig::GraphProperty property;
   property.name = std::move(name);
@@ -278,6 +288,96 @@ bool TestModelTopologyAndPins() {
   return true;
 }
 
+bool TestExplicitOutputDirectionAndType() {
+  auto document = NewDocument(
+      {Node("/Ports/Source", true, 100.0, 100.0),
+       Node("/Ports/Sink", true, 700.0, 100.0)});
+  document->addProperty(
+      "/Ports/Source",
+      Port("output", "image", ig::GraphPropertyDirection::Output));
+  document->addProperty(
+      "/Ports/Sink",
+      Port("input", "image", ig::GraphPropertyDirection::Input));
+
+  ig::NoodlesGraphView view;
+  view.setDocument(document);
+  const auto sourcePins = view.nodePins("/Ports/Source");
+  const ig::GraphPinInfo* output =
+      FindPin(sourcePins, "output", /*isOutput=*/true);
+  INK_CHECK(output != nullptr);
+  INK_CHECK(output->typeText == "image");
+  INK_CHECK(FindPin(sourcePins, "output", /*isOutput=*/false) == nullptr);
+
+  double sourceX = 0.0, sourceWidth = 0.0;
+  INK_CHECK(view.nodePosition("/Ports/Source", &sourceX, nullptr));
+  INK_CHECK(view.nodeSize("/Ports/Source", &sourceWidth, nullptr));
+  ig::GraphLinkInfo preview;
+  view.pointerDown(sourceX + sourceWidth * 0.03, output->centerY);
+  INK_CHECK(!view.activeLinkPreview(&preview));
+  view.pointerUp(sourceX + sourceWidth * 0.03, output->centerY);
+
+  const auto sinkPins = view.nodePins("/Ports/Sink");
+  const ig::GraphPinInfo* input =
+      FindPin(sinkPins, "input", /*isOutput=*/false);
+  INK_CHECK(input != nullptr);
+  INK_CHECK(input->typeText == "image");
+  INK_CHECK(FindPin(sinkPins, "input", /*isOutput=*/true) == nullptr);
+
+  INK_CHECK(document->authorConnection("/Ports/Sink", "input",
+                                       "/Ports/Source", "output"));
+  view.refresh();
+  INK_CHECK(view.linkCount() == 1);
+  const auto links = view.links();
+  INK_CHECK(links.size() == 1);
+  INK_CHECK(links[0].sourceNodeId == "/Ports/Source");
+  INK_CHECK(links[0].sourcePort == "output");
+  INK_CHECK(std::abs(links[0].startX - output->centerX) < 1e-6);
+  INK_CHECK(std::abs(links[0].startY - output->centerY) < 1e-6);
+  std::printf("  explicit output row carries its image type and link source ok\n");
+  return true;
+}
+
+bool TestUnconnectedRowDragPreviewUsesRowEdge() {
+  auto document =
+      NewDocument({Node("/Preview/Source", true, 120.0, 90.0)});
+  document->addProperty("/Preview/Source", Numeric("top"));
+  document->addProperty("/Preview/Source", Numeric("middle"));
+  document->addProperty("/Preview/Source", Numeric("bottom"));
+
+  ig::NoodlesGraphView view;
+  view.setDocument(document);
+  const auto pins = view.nodePins("/Preview/Source");
+  const ig::GraphPinInfo* row = FindPin(pins, "top", /*isOutput=*/false);
+  INK_CHECK(row != nullptr);
+
+  double x = 0.0, y = 0.0, width = 0.0, height = 0.0;
+  INK_CHECK(view.nodePosition("/Preview/Source", &x, &y));
+  INK_CHECK(view.nodeSize("/Preview/Source", &width, &height));
+  INK_CHECK(std::abs(row->centerY - (y + height * 0.5)) > 1.0);
+  const double rightBandX = x + width * 0.97;
+
+  // The preview is initialized on pointerDown, before any move event, and the
+  // fixed source stays on the grabbed row's right edge for the whole drag.
+  view.pointerDown(rightBandX, row->centerY);
+  ig::GraphLinkInfo preview;
+  INK_CHECK(view.activeLinkPreview(&preview));
+  INK_CHECK(std::abs(preview.startX - (x + width)) < 1e-6);
+  INK_CHECK(std::abs(preview.startY - row->centerY) < 1e-6);
+  INK_CHECK(std::abs(preview.endX - preview.startX) < 1e-6);
+  INK_CHECK(std::abs(preview.endY - preview.startY) < 1e-6);
+
+  view.pointerMove(rightBandX + 160.0, row->centerY + 75.0);
+  INK_CHECK(view.activeLinkPreview(&preview));
+  INK_CHECK(std::abs(preview.startX - (x + width)) < 1e-6);
+  INK_CHECK(std::abs(preview.startY - row->centerY) < 1e-6);
+  INK_CHECK(std::abs(preview.startY - (y + height * 0.5)) > 1.0);
+
+  view.pointerUp(rightBandX + 160.0, row->centerY + 75.0);
+  INK_CHECK(!view.activeLinkPreview(&preview));
+  std::printf("  unconnected-row drag preview stays on right row edge ok\n");
+  return true;
+}
+
 bool TestPositionsAndLayout() {
   ig::NoodlesGraphView view;
   view.setDocument(MakeStage());
@@ -405,6 +505,99 @@ bool TestValueRowCapture() {
   INK_CHECK(!aStyle->isScrubable);           // token → display-only
   INK_CHECK(aStyle->typeText.find("solid") != std::string::npos);
   std::printf("  value-row capture + type composition ok\n");
+  return true;
+}
+
+// A display-only asset row has three distinct gestures: a stationary middle
+// tap activates host UI, a middle drag moves the node, and the edge band starts
+// connection authoring. Only the first one may fire attributeActivated.
+bool TestDisplayOnlyRowActivationPriority() {
+  auto document =
+      NewDocument({Node("/Asset/Source", true, 120.0, 90.0)});
+  ig::GraphProperty path =
+      Display("path", "asset", "picked/source image.exr");
+  path.stringValue = "/Volumes/Demo/picked/source image.exr";
+  document->addProperty("/Asset/Source", std::move(path));
+
+  ig::NoodlesGraphView view;
+  int beginCount = 0;
+  int endCount = 0;
+  int activationCount = 0;
+  int attributeEditCount = 0;
+  int topologyCount = 0;
+  std::string activatedNode;
+  std::string activatedAttribute;
+  ig::GraphEditDelegate delegate;
+  delegate.beginEdit = [&] { ++beginCount; };
+  delegate.endEdit = [&] { ++endCount; };
+  delegate.attributeActivated =
+      [&](const std::string& nodeId, const std::string& attributeName) {
+        ++activationCount;
+        activatedNode = nodeId;
+        activatedAttribute = attributeName;
+      };
+  delegate.attributeEdited =
+      [&](const std::string&, const std::string&, bool) {
+        ++attributeEditCount;
+      };
+  delegate.topologyEdited = [&] { ++topologyCount; };
+  view.setDelegate(delegate);
+  view.setDocument(document);
+
+  auto pins = view.nodePins("/Asset/Source");
+  const ig::GraphPinInfo* pathPin =
+      FindPin(pins, "path", /*isOutput=*/false);
+  INK_CHECK(pathPin != nullptr);
+  INK_CHECK(pathPin->hasValue);
+  INK_CHECK(!pathPin->isScrubable);
+  INK_CHECK(pathPin->typeText.find("asset") != std::string::npos);
+
+  double x = 0.0, y = 0.0, width = 0.0, height = 0.0;
+  INK_CHECK(view.nodePosition("/Asset/Source", &x, &y));
+  INK_CHECK(view.nodeSize("/Asset/Source", &width, &height));
+  (void)y;
+  (void)height;
+  const double middleX = x + width * 0.5;
+
+  // A stationary middle tap activates exactly once and is not a document edit.
+  view.pointerDown(middleX, pathPin->centerY);
+  view.pointerUp(middleX, pathPin->centerY);
+  INK_CHECK(activationCount == 1);
+  INK_CHECK(activatedNode == "/Asset/Source");
+  INK_CHECK(activatedAttribute == "path");
+  INK_CHECK(beginCount == 0 && endCount == 0);
+  INK_CHECK(attributeEditCount == 0);
+  INK_CHECK(topologyCount == 0);
+
+  // A real middle drag is a node move and must suppress activation.
+  view.pointerDown(middleX, pathPin->centerY);
+  view.pointerMove(middleX + 60.0, pathPin->centerY + 35.0);
+  view.pointerUp(middleX + 60.0, pathPin->centerY + 35.0);
+  double movedX = 0.0, movedY = 0.0, movedWidth = 0.0;
+  INK_CHECK(view.nodePosition("/Asset/Source", &movedX, &movedY));
+  INK_CHECK(view.nodeSize("/Asset/Source", &movedWidth, nullptr));
+  INK_CHECK(movedX != x || movedY != y);
+  INK_CHECK(activationCount == 1);
+  INK_CHECK(beginCount == 1 && endCount == 1);
+  INK_CHECK(attributeEditCount == 0);
+  INK_CHECK(topologyCount == 0);
+
+  // The moved row's right edge remains a link gesture, never an activation.
+  pins = view.nodePins("/Asset/Source");
+  pathPin = FindPin(pins, "path", /*isOutput=*/false);
+  INK_CHECK(pathPin != nullptr);
+  const double rightBandX = movedX + movedWidth * 0.97;
+  view.pointerDown(rightBandX, pathPin->centerY);
+  ig::GraphLinkInfo preview;
+  INK_CHECK(view.activeLinkPreview(&preview));
+  view.pointerUp(rightBandX, pathPin->centerY);
+  INK_CHECK(!view.activeLinkPreview(&preview));
+  INK_CHECK(activationCount == 1);
+  INK_CHECK(beginCount == 1 && endCount == 1);
+  INK_CHECK(attributeEditCount == 0);
+  INK_CHECK(topologyCount == 0);
+
+  std::printf("  display-only row activation / drag / edge priority ok\n");
   return true;
 }
 
@@ -1438,10 +1631,16 @@ int main() {
   struct Case { const char* name; bool (*fn)(); };
   const Case cases[] = {
       {"model_topology_and_pins", TestModelTopologyAndPins},
+      {"explicit_output_direction_and_type",
+       TestExplicitOutputDirectionAndType},
+      {"unconnected_row_preview_anchor",
+       TestUnconnectedRowDragPreviewUsesRowEdge},
       {"positions_and_layout", TestPositionsAndLayout},
       {"pointer_selects_node", TestPointerSelectsNode},
       {"pin_drag_authors_edge", TestPinDragAuthorsEdge},
       {"value_row_capture", TestValueRowCapture},
+      {"display_only_row_activation_priority",
+       TestDisplayOnlyRowActivationPriority},
       {"scrub_authors_value", TestScrubAuthorsValue},
       {"title_only_node_drag", TestTitleOnlyNodeDrag},
       {"pinch_zoom_not_compounding", TestPinchZoomNotCompounding},
