@@ -32,6 +32,10 @@ The runnable macOS and iPadOS products are both named NoodlesDemo. They render
 the same six-node, topology-driven image pipeline, with every node initially
 visible:
 
+[![Watch the NoodlesDemo graph editor demo](media/demo-poster.jpg)](media/demo.mp4)
+
+[Watch the 39-second NoodlesDemo video](media/demo.mp4).
+
 ```text
 Noise.output:image        -> Grade.input:image
 Source Image.output:image -> Composite.background:image
