@@ -96,10 +96,15 @@ function(noodles_apple_bundle_noodles_runtime target)
 endfunction()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesAppleUIKit)
+  set(_noodles_demo_asset_catalog
+      "${CMAKE_CURRENT_SOURCE_DIR}/iPad/Assets.xcassets")
+  set_source_files_properties("${_noodles_demo_asset_catalog}" PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources")
   add_executable(NoodlesDemo MACOSX_BUNDLE
     iPad/main.mm
     iPad/NoodlesDemoViewController.mm
-    iPad/NoodlesDemoViewController.h)
+    iPad/NoodlesDemoViewController.h
+    "${_noodles_demo_asset_catalog}")
   target_compile_options(NoodlesDemo PRIVATE
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   target_link_libraries(NoodlesDemo PRIVATE
@@ -111,6 +116,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesAppleUIKit)
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/iPad/Info.plist.in"
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC "YES"
     XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
     XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.noodlesdemo.ipad"
     XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "2")
   noodles_apple_add_demo_resources(NoodlesDemo)
@@ -119,10 +125,15 @@ endif()
 
 if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND
    TARGET NoodlesAppleAppKit)
+  set(_noodles_demo_macos_icon
+      "${CMAKE_CURRENT_SOURCE_DIR}/macOS/NoodlesDemo.icns")
+  set_source_files_properties("${_noodles_demo_macos_icon}" PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources")
   add_executable(NoodlesDemo MACOSX_BUNDLE
     macOS/main.mm
     macOS/NoodlesDemoViewController.mm
-    macOS/NoodlesDemoViewController.h)
+    macOS/NoodlesDemoViewController.h
+    "${_noodles_demo_macos_icon}")
   target_compile_options(NoodlesDemo PRIVATE
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   target_link_libraries(NoodlesDemo PRIVATE
@@ -130,6 +141,7 @@ if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND
   set_target_properties(NoodlesDemo PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "NoodlesDemo"
     MACOSX_BUNDLE_GUI_IDENTIFIER "org.noodlesdemo.macos"
+    MACOSX_BUNDLE_ICON_FILE "NoodlesDemo.icns"
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC "YES")
   noodles_apple_add_demo_resources(NoodlesDemo)
   noodles_apple_bundle_noodles_runtime(NoodlesDemo)
@@ -138,3 +150,5 @@ endif()
 unset(_noodles_example_asset_dir)
 unset(_noodles_example_target)
 unset(_noodles_target_asset_dir)
+unset(_noodles_demo_asset_catalog)
+unset(_noodles_demo_macos_icon)
