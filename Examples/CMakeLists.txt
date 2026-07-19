@@ -101,6 +101,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesAppleUIKit)
   set_source_files_properties("${_noodles_demo_asset_catalog}" PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources")
   add_executable(NoodlesDemo MACOSX_BUNDLE
+    AppleDemoImageLoader.mm
     iPad/main.mm
     iPad/NoodlesDemoViewController.mm
     iPad/NoodlesDemoViewController.h
@@ -109,7 +110,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesAppleUIKit)
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   target_link_libraries(NoodlesDemo PRIVATE
     NoodlesApple::UIKit NoodlesAppleExampleFixture
-    "-framework Foundation" "-framework CoreGraphics")
+    "-framework Foundation" "-framework CoreGraphics"
+    "-framework ImageIO" "-framework UniformTypeIdentifiers")
   set_target_properties(NoodlesDemo PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "NoodlesDemo"
     MACOSX_BUNDLE_GUI_IDENTIFIER "org.noodlesdemo.ipad"
@@ -130,6 +132,7 @@ if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND
   set_source_files_properties("${_noodles_demo_macos_icon}" PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources")
   add_executable(NoodlesDemo MACOSX_BUNDLE
+    AppleDemoImageLoader.mm
     macOS/main.mm
     macOS/NoodlesDemoViewController.mm
     macOS/NoodlesDemoViewController.h
@@ -137,7 +140,8 @@ if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND
   target_compile_options(NoodlesDemo PRIVATE
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   target_link_libraries(NoodlesDemo PRIVATE
-    NoodlesApple::AppKit NoodlesAppleExampleFixture)
+    NoodlesApple::AppKit NoodlesAppleExampleFixture
+    "-framework ImageIO" "-framework UniformTypeIdentifiers")
   set_target_properties(NoodlesDemo PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "NoodlesDemo"
     MACOSX_BUNDLE_GUI_IDENTIFIER "org.noodlesdemo.macos"

@@ -24,12 +24,35 @@ std::string FormatScalar(double value, const std::string& type) {
   return buffer;
 }
 
+std::string TruncateDisplay(const std::string& value,
+                            std::size_t maximum = 28) {
+  if (value.size() <= maximum) return value;
+  std::size_t end = maximum;
+  while (end > 0 && (static_cast<unsigned char>(value[end]) & 0xC0U) == 0x80U) {
+    --end;
+  }
+  return value.substr(0, end) + "\xE2\x80\xA6";
+}
+
+std::string FormatStringDisplay(const std::string& value,
+                                const std::string& type) {
+  if (value.empty()) return "(none)";
+  if (type == "asset") {
+    const std::size_t separator = value.find_last_of("/\\");
+    if (separator != std::string::npos && separator + 1 < value.size()) {
+      return TruncateDisplay(value.substr(separator + 1));
+    }
+  }
+  return TruncateDisplay(value);
+}
+
 double CastScalar(double value, const std::string& type) {
   if (type == "bool") return value >= 0.5 ? 1.0 : 0.0;
   if (type == "uint") {
     const double rounded = std::round(value);
-    return std::clamp(rounded, 0.0,
-                      static_cast<double>(std::numeric_limits<unsigned>::max()));
+    return std::clamp(
+        rounded, 0.0,
+        static_cast<double>(std::numeric_limits<unsigned>::max()));
   }
   if (type == "int") {
     return std::clamp(std::round(value),
@@ -69,21 +92,17 @@ struct InMemoryGraphDocument::Impl {
 
   static GraphProperty* FindProperty(NodeRecord& record,
                                      const std::string& name) {
-    auto found = std::find_if(record.node.properties.begin(),
-                              record.node.properties.end(),
-                              [&](const GraphProperty& p) {
-                                return p.name == name;
-                              });
+    auto found = std::find_if(
+        record.node.properties.begin(), record.node.properties.end(),
+        [&](const GraphProperty& p) { return p.name == name; });
     return found == record.node.properties.end() ? nullptr : &*found;
   }
 
   static const GraphProperty* FindProperty(const NodeRecord& record,
                                            const std::string& name) {
-    auto found = std::find_if(record.node.properties.begin(),
-                              record.node.properties.end(),
-                              [&](const GraphProperty& p) {
-                                return p.name == name;
-                              });
+    auto found = std::find_if(
+        record.node.properties.begin(), record.node.properties.end(),
+        [&](const GraphProperty& p) { return p.name == name; });
     return found == record.node.properties.end() ? nullptr : &*found;
   }
 
@@ -259,11 +278,10 @@ GraphSnapshot InMemoryGraphDocument::snapshot(double displayFrame) const {
         // scalar time samples. Discrete scalars (Bool/integer) remain held.
         const auto previous = std::prev(value);
         const double span = value->first - previous->first;
-        const double alpha = span > 0.0
-                                 ? (displayFrame - previous->first) / span
-                                 : 0.0;
-        sampledValue = previous->second +
-                       (value->second - previous->second) * alpha;
+        const double alpha =
+            span > 0.0 ? (displayFrame - previous->first) / span : 0.0;
+        sampledValue =
+            previous->second + (value->second - previous->second) * alpha;
       } else {
         sampledValue = std::prev(value)->second;
       }
@@ -286,8 +304,8 @@ bool InMemoryGraphDocument::containsNode(const std::string& nodeId) const {
 bool InMemoryGraphDocument::authorRelationship(
     const std::string& sourceNodeId, const std::string& relationshipName,
     const std::string& targetNodeId) {
-  if (sourceNodeId.empty() || relationshipName.empty() || targetNodeId.empty() ||
-      sourceNodeId == targetNodeId) {
+  if (sourceNodeId.empty() || relationshipName.empty() ||
+      targetNodeId.empty() || sourceNodeId == targetNodeId) {
     return false;
   }
   std::vector<Observer> observers;
@@ -305,8 +323,9 @@ bool InMemoryGraphDocument::authorRelationship(
       return false;
     }
     GraphEdge edge{sourceNodeId, relationshipName, targetNodeId, {}, true};
-    if (std::any_of(impl_->edges.begin(), impl_->edges.end(),
-                    [&](const GraphEdge& old) { return SameEdge(old, edge); })) {
+    if (std::any_of(
+            impl_->edges.begin(), impl_->edges.end(),
+            [&](const GraphEdge& old) { return SameEdge(old, edge); })) {
       return false;
     }
     if (!property) {
@@ -327,10 +346,9 @@ bool InMemoryGraphDocument::removeRelationship(
   {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     GraphEdge edge{sourceNodeId, relationshipName, targetNodeId, {}, true};
-    auto found = std::find_if(impl_->edges.begin(), impl_->edges.end(),
-                              [&](const GraphEdge& old) {
-                                return SameEdge(old, edge);
-                              });
+    auto found =
+        std::find_if(impl_->edges.begin(), impl_->edges.end(),
+                     [&](const GraphEdge& old) { return SameEdge(old, edge); });
     if (found == impl_->edges.end()) return false;
     impl_->edges.erase(found);
     observers = impl_->observerCopy();
@@ -339,9 +357,10 @@ bool InMemoryGraphDocument::removeRelationship(
   return true;
 }
 
-bool InMemoryGraphDocument::authorConnection(
-    const std::string& inputNodeId, const std::string& inputPort,
-    const std::string& outputNodeId, const std::string& outputPort) {
+bool InMemoryGraphDocument::authorConnection(const std::string& inputNodeId,
+                                             const std::string& inputPort,
+                                             const std::string& outputNodeId,
+                                             const std::string& outputPort) {
   if (inputNodeId.empty() || inputPort.empty() || outputNodeId.empty() ||
       inputNodeId == outputNodeId) {
     return false;
@@ -368,8 +387,9 @@ bool InMemoryGraphDocument::authorConnection(
       }
     }
     GraphEdge edge{inputNodeId, inputPort, outputNodeId, outputPort, false};
-    if (std::any_of(impl_->edges.begin(), impl_->edges.end(),
-                    [&](const GraphEdge& old) { return SameEdge(old, edge); })) {
+    if (std::any_of(
+            impl_->edges.begin(), impl_->edges.end(),
+            [&](const GraphEdge& old) { return SameEdge(old, edge); })) {
       return false;
     }
     impl_->edges.push_back(std::move(edge));
@@ -379,17 +399,17 @@ bool InMemoryGraphDocument::authorConnection(
   return true;
 }
 
-bool InMemoryGraphDocument::removeConnection(
-    const std::string& inputNodeId, const std::string& inputPort,
-    const std::string& outputNodeId, const std::string& outputPort) {
+bool InMemoryGraphDocument::removeConnection(const std::string& inputNodeId,
+                                             const std::string& inputPort,
+                                             const std::string& outputNodeId,
+                                             const std::string& outputPort) {
   std::vector<Observer> observers;
   {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     GraphEdge edge{inputNodeId, inputPort, outputNodeId, outputPort, false};
-    auto found = std::find_if(impl_->edges.begin(), impl_->edges.end(),
-                              [&](const GraphEdge& old) {
-                                return SameEdge(old, edge);
-                              });
+    auto found =
+        std::find_if(impl_->edges.begin(), impl_->edges.end(),
+                     [&](const GraphEdge& old) { return SameEdge(old, edge); });
     if (found == impl_->edges.end()) return false;
     impl_->edges.erase(found);
     observers = impl_->observerCopy();
@@ -398,8 +418,8 @@ bool InMemoryGraphDocument::removeConnection(
   return true;
 }
 
-bool InMemoryGraphDocument::setNodePosition(const std::string& nodeId,
-                                            double x, double y) {
+bool InMemoryGraphDocument::setNodePosition(const std::string& nodeId, double x,
+                                            double y) {
   std::vector<Observer> observers;
   {
     std::lock_guard<std::mutex> lock(impl_->mutex);
@@ -424,7 +444,8 @@ bool InMemoryGraphDocument::clearNodePosition(const std::string& nodeId) {
   {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     auto node = impl_->nodes.find(nodeId);
-    if (node == impl_->nodes.end() || !node->second.node.hasPosition) return false;
+    if (node == impl_->nodes.end() || !node->second.node.hasPosition)
+      return false;
     node->second.node.hasPosition = false;
     node->second.node.posX = 0.0;
     node->second.node.posY = 0.0;
@@ -435,9 +456,10 @@ bool InMemoryGraphDocument::clearNodePosition(const std::string& nodeId) {
   return true;
 }
 
-bool InMemoryGraphDocument::setAttributeValue(
-    const std::string& nodeId, const std::string& attributeName, double value,
-    double displayFrame) {
+bool InMemoryGraphDocument::setAttributeValue(const std::string& nodeId,
+                                              const std::string& attributeName,
+                                              double value,
+                                              double displayFrame) {
   std::vector<Observer> observers;
   {
     std::lock_guard<std::mutex> lock(impl_->mutex);
@@ -452,7 +474,8 @@ bool InMemoryGraphDocument::setAttributeValue(
     auto samples = node->second.samples.find(attributeName);
     if (samples != node->second.samples.end() && !samples->second.empty()) {
       auto found = samples->second.find(displayFrame);
-      if (found != samples->second.end() && found->second == value) return false;
+      if (found != samples->second.end() && found->second == value)
+        return false;
       samples->second[displayFrame] = value;
     } else {
       if (property->hasValue && property->numericValue == value) return false;
@@ -460,6 +483,32 @@ bool InMemoryGraphDocument::setAttributeValue(
       property->numericValue = value;
       property->displayValue = FormatScalar(value, property->type);
     }
+    observers = impl_->observerCopy();
+  }
+  Impl::Notify(observers, {GraphDocumentChange::Kind::AttributeValue, nodeId,
+                           attributeName});
+  return true;
+}
+
+bool InMemoryGraphDocument::setStringAttributeValue(
+    const std::string& nodeId, const std::string& attributeName,
+    const std::string& value, double displayFrame) {
+  (void)displayFrame;
+  std::vector<Observer> observers;
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    auto node = impl_->nodes.find(nodeId);
+    if (node == impl_->nodes.end()) return false;
+    GraphProperty* property = Impl::FindProperty(node->second, attributeName);
+    if (!property || property->kind != GraphPropertyKind::Attribute ||
+        (property->type != "asset" && property->type != "string" &&
+         property->type != "token")) {
+      return false;
+    }
+    if (property->hasValue && property->stringValue == value) return false;
+    property->hasValue = true;
+    property->stringValue = value;
+    property->displayValue = FormatStringDisplay(value, property->type);
     observers = impl_->observerCopy();
   }
   Impl::Notify(observers, {GraphDocumentChange::Kind::AttributeValue, nodeId,

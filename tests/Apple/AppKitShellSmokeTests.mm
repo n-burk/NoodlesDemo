@@ -1,5 +1,8 @@
 #import <AppKit/AppKit.h>
+#import <ImageIO/ImageIO.h>
 #import <NoodlesApple/AppKit/NoodlesAppleGraphView.h>
+
+#include "../../Examples/AppleDemoImageLoader.h"
 
 #include <noodles/apple/GraphDocument.h>
 #include <noodles/apple/GraphEditor.h>
@@ -21,6 +24,51 @@ namespace na = noodles::apple;
 
 int main() {
   @autoreleasepool {
+    // Pin the native loader's row orientation and straight-alpha contract. A
+    // CGImage data provider stores these pixels in top-to-bottom row order.
+    const std::uint8_t encodedPixels[] = {
+        255, 0, 0, 255, 0, 128, 0, 128,
+        0, 0, 255, 255, 0, 0, 0, 0,
+    };
+    NSData *encodedData = [NSData dataWithBytes:encodedPixels
+                                         length:sizeof(encodedPixels)];
+    CGDataProviderRef encodedProvider =
+        CGDataProviderCreateWithCFData((__bridge CFDataRef)encodedData);
+    CGColorSpaceRef encodedColorSpace = CGColorSpaceCreateDeviceRGB();
+    CGImageRef encodedImage = CGImageCreate(
+        2, 2, 8, 32, 8, encodedColorSpace,
+        kCGBitmapByteOrder32Big | kCGImageAlphaPremultipliedLast,
+        encodedProvider, nullptr, false, kCGRenderingIntentDefault);
+    CHECK(encodedImage != nullptr);
+    NSURL *imageURL = [NSURL fileURLWithPath:[NSTemporaryDirectory()
+        stringByAppendingPathComponent:[[NSUUID UUID].UUIDString
+                                           stringByAppendingPathExtension:@"png"]]];
+    CGImageDestinationRef destination = CGImageDestinationCreateWithURL(
+        (__bridge CFURLRef)imageURL, CFSTR("public.png"), 1, nullptr);
+    CHECK(destination != nullptr);
+    CGImageDestinationAddImage(destination, encodedImage, nullptr);
+    CHECK(CGImageDestinationFinalize(destination));
+    CFRelease(destination);
+    CGImageRelease(encodedImage);
+    CGColorSpaceRelease(encodedColorSpace);
+    CGDataProviderRelease(encodedProvider);
+
+    std::string decodeError;
+    const auto decoded =
+        noodles::apple::examples::DecodeDemoImageAtURL(imageURL, &decodeError);
+    CHECK(decodeError.empty());
+    CHECK(decoded.width == 2);
+    CHECK(decoded.height == 2);
+    CHECK(decoded.pixels.size() == 16);
+    CHECK(decoded.pixels[0] > 250 && decoded.pixels[1] < 5 &&
+          decoded.pixels[2] < 5);
+    CHECK(decoded.pixels[4] < 5 && decoded.pixels[5] > 250 &&
+          decoded.pixels[6] < 5 && decoded.pixels[7] >= 127 &&
+          decoded.pixels[7] <= 129);
+    CHECK(decoded.pixels[8] < 5 && decoded.pixels[9] < 5 &&
+          decoded.pixels[10] > 250);
+    [[NSFileManager defaultManager] removeItemAtURL:imageURL error:nil];
+
     na::GraphNode node;
     node.id = "/Smoke/Node";
     node.name = "Smoke Node";
@@ -36,6 +84,13 @@ int main() {
     value.numericValue = 0.5;
     value.displayValue = "0.5";
     node.properties.push_back(value);
+    na::GraphProperty assetPath;
+    assetPath.name = "asset:path";
+    assetPath.type = "asset";
+    assetPath.hasValue = true;
+    assetPath.isScrubable = false;
+    assetPath.displayValue = "/tmp/source.png";
+    node.properties.push_back(assetPath);
 
     na::GraphSnapshot snapshot;
     snapshot.nodes.push_back(node);
@@ -52,6 +107,37 @@ int main() {
     CHECK([view graphEditor] == editor);
     CHECK([view.assetsPath isEqualToString:@"/tmp/noodles-assets"]);
     CHECK(editor->nodeCount() == 1);
+    CHECK([[view selectedNodeId] isEqualToString:@""]);
+
+    __block NSString *activatedNodeId = nil;
+    __block NSString *activatedAttributeName = nil;
+    view.onAttributeActivated = ^(NSString *nodeId,
+                                  NSString *attributeName) {
+      activatedNodeId = [nodeId copy];
+      activatedAttributeName = [attributeName copy];
+    };
+
+    const auto pins = editor->nodePins("/Smoke/Node");
+    const na::GraphPinInfo *assetPin = nullptr;
+    for (const na::GraphPinInfo &pin : pins) {
+      if (pin.name == "asset:path" && !pin.isOutput) {
+        assetPin = &pin;
+        break;
+      }
+    }
+    CHECK(assetPin != nullptr);
+    CHECK(assetPin->hasValue);
+    CHECK(!assetPin->isScrubable);
+    double nodeX = 0.0;
+    double nodeWidth = 0.0;
+    CHECK(editor->nodePosition("/Smoke/Node", &nodeX, nullptr));
+    CHECK(editor->nodeSize("/Smoke/Node", &nodeWidth, nullptr));
+    const NSPoint assetRowCenter =
+        NSMakePoint(nodeX + nodeWidth * 0.5, assetPin->centerY);
+    [view pointerDown:assetRowCenter];
+    [view pointerUp:assetRowCenter];
+    CHECK([activatedNodeId isEqualToString:@"/Smoke/Node"]);
+    CHECK([activatedAttributeName isEqualToString:@"asset:path"]);
 
     [view setOverlayOpacity:0.5f];
     [view setClearColorRed:0.0f green:0.0f blue:0.0f alpha:1.0f];
@@ -60,7 +146,7 @@ int main() {
     [view reloadGraph];
     (void)[view frameAllWithPadding:24.0];
     CHECK(editor->nodeCount() == 1);
-    CHECK([[view selectedNodeId] isEqualToString:@""]);
+    CHECK([[view selectedNodeId] isEqualToString:@"/Smoke/Node"]);
   }
   std::puts("NoodlesApple AppKit shell smoke ok");
   return 0;

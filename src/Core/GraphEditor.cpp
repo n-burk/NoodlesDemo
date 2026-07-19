@@ -247,6 +247,10 @@ struct GraphEditor::Impl {
   // group's fold on pointerUp (a real drag still moves the node).
   std::string foldTapNode, foldTapGroup;
 
+  // A non-scrubable value row still acts as a node-move handle when dragged,
+  // but a stationary middle-row tap asks the host to activate that attribute.
+  std::string activationTapNode, activationTapAttribute;
+
   // Scrub-to-edit a value row.
   std::string scrubNodeId, scrubPin, scrubTypeToken;
   double scrubValue0 = 0.0;   // value at gesture start (absolute delta base)
@@ -2195,6 +2199,8 @@ void GraphEditor::pointerDown(double x, double y) {
   s.downViewY = s.lastViewY = y;
   s.foldTapNode.clear();
   s.foldTapGroup.clear();
+  s.activationTapNode.clear();
+  s.activationTapAttribute.clear();
 
   // 0) The minimap claims the pointer before ANY other hit-testing while it is
   //    visible: a press inside its frame begins a pan-drag and immediately
@@ -2274,12 +2280,14 @@ void GraphEditor::pointerDown(double x, double y) {
           s.beginNewLinkDrag(hit, rowPin, /*isOutput=*/false);
           return;
         }
-        // Middle band: a scrubable value row scrubs.
-        if (s.valueScrubEnabled) {
-          auto vn = s.valueRows.find(hit);
-          if (vn != s.valueRows.end()) {
-            auto vr = vn->second.find(rowPin);
-            if (vr != vn->second.end() && vr->second.scrubable) {
+        // Middle band: a scrubable value row scrubs. A stationary tap on a
+        // display-only value row activates it through the host delegate; a
+        // drag still falls through to ordinary node movement.
+        auto vn = s.valueRows.find(hit);
+        if (vn != s.valueRows.end()) {
+          auto vr = vn->second.find(rowPin);
+          if (vr != vn->second.end()) {
+            if (s.valueScrubEnabled && vr->second.scrubable) {
               s.drag = Impl::Drag::Scrub;
               s.scrubNodeId = hit;
               s.scrubPin = rowPin;
@@ -2289,6 +2297,10 @@ void GraphEditor::pointerDown(double x, double y) {
               s.scrubBegan = false;
               s.requestRender();
               return;
+            }
+            if (!vr->second.scrubable) {
+              s.activationTapNode = hit;
+              s.activationTapAttribute = rowPin;
             }
           }
         }
@@ -2426,6 +2438,12 @@ void GraphEditor::pointerUp(double x, double y) {
         s.layoutNodeOne(n);
         s.rebuildSpatialIndex();  // link bounds shift with the folded rows
         s.requestRender();
+      } else if (!s.activationTapAttribute.empty() &&
+                 s.activationTapNode == s.dragNodeId) {
+        if (s.delegate.attributeActivated) {
+          s.delegate.attributeActivated(s.activationTapNode,
+                                        s.activationTapAttribute);
+        }
       } else {
         // Tap on the title CARET zone (the triangle at the title's left edge)
         // toggles whole-node collapse; the rest of the title stays a plain
@@ -2445,6 +2463,8 @@ void GraphEditor::pointerUp(double x, double y) {
     s.dragNodeId.clear();
     s.foldTapNode.clear();
     s.foldTapGroup.clear();
+    s.activationTapNode.clear();
+    s.activationTapAttribute.clear();
     return;
   }
 

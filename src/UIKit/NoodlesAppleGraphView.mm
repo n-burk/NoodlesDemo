@@ -161,6 +161,15 @@ NSString *ToNSString(const std::string &value) {
         view.onSelectionChanged(identifier);
     });
   };
+  delegate.attributeActivated =
+      [weakSelf](const std::string &nodeId,
+                 const std::string &attributeName) {
+        NSString *identifier = ToNSString(nodeId);
+        NSString *attribute = ToNSString(attributeName);
+        NoodlesAppleGraphView *view = weakSelf;
+        if (view.onAttributeActivated)
+          view.onAttributeActivated(identifier, attribute);
+      };
   delegate.topologyEdited = [weakSelf]() {
     NoodlesAppleGraphView *view = weakSelf;
     if (view.onTopologyEdited)

@@ -28,27 +28,38 @@ forwards optional stylus misses to a background canvas.
 ## Runnable demo surface
 
 The runnable macOS and iPadOS products are both named NoodlesDemo. They render
-the same five-node fixture (four initially visible and
-one host-addable Source) over the same generated landscape image. That image is
-produced by a shared C++ example processor from the graph snapshot, so live
-value edits, Boolean toggles, connection edits, and frame interpolation have
-visible output instead of changing the graph UI alone. Image data noodles leave
-an explicit right-side `output` row whose displayed type is `image`, rather than
-appearing to originate from one of the node's scalar controls. The apps also
-expose controls for the shipping overlay defaults:
+the same six-node, topology-driven image pipeline, with every node initially
+visible:
+
+```text
+Source Image.output:image -> Noise.input:image
+Noise.output:image        -> Grade.input:image
+Noise.output:image        -> Composite.background:image
+Grade.output:image        -> Composite.foreground:image
+Composite.mask:relationship -> Ellipse Mask
+Composite.output:image    -> Display.surface:image
+```
+
+A shared C++ example processor evaluates the current graph snapshot from the
+Display input, so live value edits, Boolean toggles, connection edits, and frame
+interpolation visibly change the output rather than changing the graph UI alone.
+Image data noodles leave explicit right-side `output` rows whose displayed type
+is `image`, rather than appearing to originate from a node's scalar controls.
+The Source Image node also exposes an `asset`-typed `path` row: tapping its
+middle opens the native image browser, decodes the selected file off the main
+thread, and replaces the built-in landscape input.
+The apps also expose controls for the shipping overlay defaults:
 
 - overlay opacity from 0.15 through 1.0, initially 0.5;
 - display-frame scrubbing from frame 0 through 24, including an interpolated
   animated value;
-- host-driven node insertion through the public `addNodeAt` seam; and
 - a visible `noise:*` property group whose header can be folded independently.
 
 The graph itself demonstrates selection, movement, whole-node and property-group
 folding, scalar scrubbing, Boolean toggles, connection authoring and editing,
 minimap navigation, and fit-to-view layout. The iPad app additionally includes a
 drawing surface that makes sticky Pencil pass-through visible; the macOS app
-exercises mouse, scroll-pan, and trackpad magnification. Product hosts can wire
-the same add-node seam to their native external-drop API, as Inkwell does.
+exercises mouse, scroll-pan, and trackpad magnification.
 
 ## Supported and tested behavior
 

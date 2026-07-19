@@ -36,6 +36,10 @@ struct GraphProperty {
   // output-only rows on the node's right edge. Relationships remain output
   // rows regardless of this value.
   GraphPropertyDirection direction = GraphPropertyDirection::Input;
+
+  // Exact, untruncated value for token/string/asset attributes. displayValue
+  // remains presentation-only and may be shortened to keep nodes compact.
+  std::string stringValue;
 };
 
 struct GraphNode {
@@ -108,8 +112,18 @@ class GraphDocument {
                                double y) = 0;
   virtual bool clearNodePosition(const std::string& nodeId) = 0;
   virtual bool setAttributeValue(const std::string& nodeId,
-                                 const std::string& attributeName,
-                                 double value, double displayFrame) = 0;
+                                 const std::string& attributeName, double value,
+                                 double displayFrame) = 0;
+  virtual bool setStringAttributeValue(const std::string& nodeId,
+                                       const std::string& attributeName,
+                                       const std::string& value,
+                                       double displayFrame) {
+    (void)nodeId;
+    (void)attributeName;
+    (void)value;
+    (void)displayFrame;
+    return false;
+  }
 
   // Observers may run on the thread that changed the backing model. GraphEditor
   // only queues their data and applies it from processPendingDocumentChanges().

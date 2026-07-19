@@ -587,7 +587,8 @@ bool runDemoRealFontLayoutCase(const std::string& assets,
   fixture.editor->resize(kW, kH, 1.0f);
 
   const std::vector<std::string> ids{
-      "/Demo/Noise", "/Demo/Grade", "/Demo/Mask", "/Demo/Display"};
+      "/Demo/SourceImage", "/Demo/Noise", "/Demo/Grade",
+      "/Demo/Mask", "/Demo/Composite", "/Demo/Display"};
   struct Rect { double x, y, w, h; };
   std::vector<Rect> rects;
   bool ok = true;

@@ -1,12 +1,17 @@
 #import "NoodlesDemoViewController.h"
 
 #import <NoodlesApple/AppKit/NoodlesAppleGraphView.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
+#include "../AppleDemoImageLoader.h"
 #include "../DemoGraphFixture.h"
 #include "../DemoImageProcessor.h"
 
 #include <noodles/apple/GraphEditor.h>
 #include <noodles/apple/InMemoryGraphDocument.h>
+
+#include <memory>
+#include <utility>
 
 namespace {
 
@@ -21,8 +26,7 @@ NSTextField *HudLabel(NSString *text) {
   label.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium];
   label.alignment = NSTextAlignmentCenter;
   label.wantsLayer = YES;
-  label.layer.backgroundColor =
-      [NSColor colorWithWhite:0.04 alpha:0.76].CGColor;
+  label.layer.backgroundColor = [NSColor colorWithWhite:0.04 alpha:0.76].CGColor;
   label.layer.cornerRadius = 8.0;
   label.lineBreakMode = NSLineBreakByTruncatingTail;
   label.maximumNumberOfLines = 1;
@@ -32,45 +36,38 @@ NSTextField *HudLabel(NSString *text) {
 NSTextField *ControlLabel(NSString *text) {
   NSTextField *label = [NSTextField labelWithString:text];
   label.textColor = NSColor.whiteColor;
-  label.font = [NSFont monospacedDigitSystemFontOfSize:12.0
-                                               weight:NSFontWeightMedium];
+  label.font = [NSFont monospacedDigitSystemFontOfSize:12.0 weight:NSFontWeightMedium];
   label.alignment = NSTextAlignmentCenter;
   label.lineBreakMode = NSLineBreakByClipping;
   return label;
 }
 
-NSImage *ImageFromRgba(
-    const noodles::apple::examples::DemoRgbaImage &image) {
-  if (image.empty())
-    return nil;
+NSImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &image) {
+  if (image.empty()) return nil;
   const size_t rowBytes = static_cast<size_t>(image.width) * 4;
-  NSData *data = [NSData dataWithBytes:image.pixels.data()
-                                length:image.pixels.size()];
-  CGDataProviderRef provider =
-      CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
+  NSData *data = [NSData dataWithBytes:image.pixels.data() length:image.pixels.size()];
+  CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
   CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-  const CGBitmapInfo bitmapInfo =
-      kCGBitmapByteOrderDefault | kCGImageAlphaPremultipliedLast;
+  const CGBitmapInfo bitmapInfo = kCGBitmapByteOrderDefault | kCGImageAlphaPremultipliedLast;
   CGImageRef cgImage = CGImageCreate(
-      static_cast<size_t>(image.width), static_cast<size_t>(image.height), 8,
-      32, rowBytes, colorSpace, bitmapInfo, provider, nullptr, true,
-      kCGRenderingIntentDefault);
+      static_cast<size_t>(image.width), static_cast<size_t>(image.height), 8, 32, rowBytes,
+      colorSpace, bitmapInfo, provider, nullptr, true, kCGRenderingIntentDefault);
   NSImage *result =
-      cgImage ? [[NSImage alloc]
-                    initWithCGImage:cgImage
-                              size:NSMakeSize(image.width, image.height)]
+      cgImage ? [[NSImage alloc] initWithCGImage:cgImage size:NSMakeSize(image.width, image.height)]
               : nil;
-  if (cgImage)
-    CGImageRelease(cgImage);
+  if (cgImage) CGImageRelease(cgImage);
   CGColorSpaceRelease(colorSpace);
   CGDataProviderRelease(provider);
   return result;
 }
 
-} // namespace
+}  // namespace
 
 @interface NoodlesDemoViewController ()
 - (void)refreshOutputImage;
+- (void)refreshOutputImageLive:(BOOL)live;
+- (void)presentSourceImagePicker;
+- (void)loadSourceImageAtURL:(NSURL *)url;
 @end
 
 @implementation NoodlesDemoViewController {
@@ -84,19 +81,19 @@ NSImage *ImageFromRgba(
   NSTextField *_frameLabel;
   double _displayFrame;
   BOOL _didFrameGraph;
+  noodles::apple::examples::DemoRgbaImage _sourceImage;
+  NSUInteger _sourceLoadGeneration;
 }
 
 - (instancetype)initWithAssetsPath:(NSString *)assetsPath {
   self = [super initWithNibName:nil bundle:nil];
-  if (!self)
-    return nil;
+  if (!self) return nil;
   _assetsPath = [assetsPath copy];
   return self;
 }
 
 - (void)loadView {
-  NSView *container =
-      [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1200, 760)];
+  NSView *container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1200, 760)];
   container.wantsLayer = YES;
   container.layer.backgroundColor = DemoBackgroundColor().CGColor;
   self.view = container;
@@ -117,7 +114,7 @@ NSImage *ImageFromRgba(
   _graphView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   [container addSubview:_graphView];
 
-  _statusLabel = HudLabel(@"Drag to edit · Trackpad scroll pans · Pinch zooms");
+  _statusLabel = HudLabel(@"Tap Source Image path to choose · Trackpad scroll pans");
   [container addSubview:_statusLabel];
   _selectionLabel = HudLabel(@"No selection");
   [container addSubview:_selectionLabel];
@@ -125,42 +122,32 @@ NSImage *ImageFromRgba(
   NSView *controls = [[NSView alloc] initWithFrame:NSZeroRect];
   controls.translatesAutoresizingMaskIntoConstraints = NO;
   controls.wantsLayer = YES;
-  controls.layer.backgroundColor =
-      [NSColor colorWithWhite:0.04 alpha:0.82].CGColor;
+  controls.layer.backgroundColor = [NSColor colorWithWhite:0.04 alpha:0.82].CGColor;
   controls.layer.cornerRadius = 10.0;
   [container addSubview:controls];
 
   _opacityLabel = ControlLabel(@"Opacity 50%");
   NSSlider *opacitySlider = [NSSlider sliderWithValue:0.5
-                                            minValue:0.15
-                                            maxValue:1.0
-                                              target:self
-                                              action:@selector(opacityChanged:)];
+                                             minValue:0.15
+                                             maxValue:1.0
+                                               target:self
+                                               action:@selector(opacityChanged:)];
   opacitySlider.continuous = YES;
 
   _frameLabel = ControlLabel(@"Frame 12.0");
   NSSlider *frameSlider = [NSSlider sliderWithValue:12.0
-                                          minValue:0.0
-                                          maxValue:24.0
-                                            target:self
-                                            action:@selector(frameChanged:)];
+                                           minValue:0.0
+                                           maxValue:24.0
+                                             target:self
+                                             action:@selector(frameChanged:)];
   frameSlider.continuous = YES;
 
-  NSButton *addSource = [NSButton buttonWithTitle:@"Add Source"
-                                           target:self
-                                           action:@selector(addSource:)];
-  addSource.bezelStyle = NSBezelStyleRounded;
-  addSource.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold];
-
-  NSButton *fitGraph = [NSButton buttonWithTitle:@"Fit"
-                                          target:self
-                                          action:@selector(fitGraph:)];
+  NSButton *fitGraph = [NSButton buttonWithTitle:@"Fit" target:self action:@selector(fitGraph:)];
   fitGraph.bezelStyle = NSBezelStyleRounded;
   fitGraph.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold];
 
   NSStackView *controlRow = [NSStackView
-      stackViewWithViews:@[ _opacityLabel, opacitySlider, _frameLabel,
-                            frameSlider, addSource, fitGraph ]];
+      stackViewWithViews:@[ _opacityLabel, opacitySlider, _frameLabel, frameSlider, fitGraph ]];
   controlRow.translatesAutoresizingMaskIntoConstraints = NO;
   controlRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
   controlRow.alignment = NSLayoutAttributeCenterY;
@@ -168,45 +155,30 @@ NSImage *ImageFromRgba(
   [controls addSubview:controlRow];
 
   [NSLayoutConstraint activateConstraints:@[
-    [_statusLabel.bottomAnchor constraintEqualToAnchor:container.bottomAnchor
-                                              constant:-12.0],
-    [_statusLabel.leadingAnchor constraintEqualToAnchor:container.leadingAnchor
-                                               constant:12.0],
-    [_statusLabel.trailingAnchor
-        constraintLessThanOrEqualToAnchor:container.trailingAnchor
-                              constant:-12.0],
+    [_statusLabel.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-12.0],
+    [_statusLabel.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:12.0],
+    [_statusLabel.trailingAnchor constraintLessThanOrEqualToAnchor:container.trailingAnchor
+                                                          constant:-12.0],
     [_statusLabel.heightAnchor constraintEqualToConstant:32.0],
-    [_selectionLabel.bottomAnchor constraintEqualToAnchor:_statusLabel.topAnchor
-                                                 constant:-8.0],
-    [_selectionLabel.leadingAnchor
-        constraintEqualToAnchor:_statusLabel.leadingAnchor],
-    [_selectionLabel.trailingAnchor
-        constraintLessThanOrEqualToAnchor:container.trailingAnchor
-                              constant:-12.0],
+    [_selectionLabel.bottomAnchor constraintEqualToAnchor:_statusLabel.topAnchor constant:-8.0],
+    [_selectionLabel.leadingAnchor constraintEqualToAnchor:_statusLabel.leadingAnchor],
+    [_selectionLabel.trailingAnchor constraintLessThanOrEqualToAnchor:container.trailingAnchor
+                                                             constant:-12.0],
     [_selectionLabel.heightAnchor constraintEqualToConstant:28.0],
-    [controls.topAnchor constraintEqualToAnchor:container.topAnchor
-                                        constant:12.0],
+    [controls.topAnchor constraintEqualToAnchor:container.topAnchor constant:12.0],
     [controls.centerXAnchor constraintEqualToAnchor:container.centerXAnchor],
-    [controls.leadingAnchor
-        constraintGreaterThanOrEqualToAnchor:container.leadingAnchor
-                                      constant:12.0],
-    [controls.trailingAnchor
-        constraintLessThanOrEqualToAnchor:container.trailingAnchor
-                                   constant:-12.0],
-    [controlRow.topAnchor constraintEqualToAnchor:controls.topAnchor
-                                          constant:8.0],
-    [controlRow.bottomAnchor constraintEqualToAnchor:controls.bottomAnchor
-                                             constant:-8.0],
-    [controlRow.leadingAnchor constraintEqualToAnchor:controls.leadingAnchor
-                                              constant:12.0],
-    [controlRow.trailingAnchor constraintEqualToAnchor:controls.trailingAnchor
-                                               constant:-12.0],
+    [controls.leadingAnchor constraintGreaterThanOrEqualToAnchor:container.leadingAnchor
+                                                        constant:12.0],
+    [controls.trailingAnchor constraintLessThanOrEqualToAnchor:container.trailingAnchor
+                                                      constant:-12.0],
+    [controlRow.topAnchor constraintEqualToAnchor:controls.topAnchor constant:8.0],
+    [controlRow.bottomAnchor constraintEqualToAnchor:controls.bottomAnchor constant:-8.0],
+    [controlRow.leadingAnchor constraintEqualToAnchor:controls.leadingAnchor constant:12.0],
+    [controlRow.trailingAnchor constraintEqualToAnchor:controls.trailingAnchor constant:-12.0],
     [_opacityLabel.widthAnchor constraintEqualToConstant:82.0],
     [opacitySlider.widthAnchor constraintEqualToConstant:130.0],
     [_frameLabel.widthAnchor constraintEqualToConstant:82.0],
     [frameSlider.widthAnchor constraintEqualToConstant:150.0],
-    [addSource.widthAnchor constraintEqualToConstant:96.0],
-    [addSource.heightAnchor constraintEqualToConstant:28.0],
     [fitGraph.widthAnchor constraintEqualToConstant:54.0],
     [fitGraph.heightAnchor constraintEqualToConstant:28.0],
   ]];
@@ -214,49 +186,123 @@ NSImage *ImageFromRgba(
   __weak NoodlesDemoViewController *weakSelf = self;
   _graphView.onStatus = ^(NSString *message) {
     NoodlesDemoViewController *controller = weakSelf;
-    if (!controller)
-      return;
-    controller->_statusLabel.stringValue =
-        message.length > 0 ? message : @"Ready";
+    if (!controller) return;
+    controller->_statusLabel.stringValue = message.length > 0 ? message : @"Ready";
   };
   _graphView.onSelectionChanged = ^(NSString *nodeId) {
     NoodlesDemoViewController *controller = weakSelf;
-    if (!controller)
-      return;
+    if (!controller) return;
     controller->_selectionLabel.stringValue =
-        nodeId.length > 0 ? [@"Selected  " stringByAppendingString:nodeId]
-                          : @"No selection";
+        nodeId.length > 0 ? [@"Selected  " stringByAppendingString:nodeId] : @"No selection";
   };
-  _graphView.onAttributeEdited =
-      ^(NSString *nodeId, NSString *attributeName, BOOL live) {
-        (void)nodeId;
-        (void)attributeName;
-        (void)live;
-        NoodlesDemoViewController *controller = weakSelf;
-        if (controller)
-          [controller refreshOutputImage];
-      };
+  _graphView.onAttributeActivated = ^(NSString *nodeId, NSString *attributeName) {
+    NoodlesDemoViewController *controller = weakSelf;
+    if (controller && [nodeId isEqualToString:@"/Demo/SourceImage"] &&
+        [attributeName isEqualToString:@"path"]) {
+      [controller presentSourceImagePicker];
+    }
+  };
+  _graphView.onAttributeEdited = ^(NSString *nodeId, NSString *attributeName, BOOL live) {
+    (void)nodeId;
+    (void)attributeName;
+    NoodlesDemoViewController *controller = weakSelf;
+    if (controller) [controller refreshOutputImageLive:live];
+  };
   _graphView.onTopologyEdited = ^{
     NoodlesDemoViewController *controller = weakSelf;
-    if (controller)
-      [controller refreshOutputImage];
+    if (controller) [controller refreshOutputImage];
   };
   _graphView.onGraphStructureChanged = ^{
     NoodlesDemoViewController *controller = weakSelf;
-    if (controller)
-      [controller refreshOutputImage];
+    if (controller) [controller refreshOutputImage];
   };
   [self refreshOutputImage];
 }
 
-- (void)refreshOutputImage {
-  if (!_fixture.document || !_outputView)
-    return;
-  const noodles::apple::GraphSnapshot snapshot =
-      _fixture.document->snapshot(_displayFrame);
+- (void)refreshOutputImageLive:(BOOL)live {
+  if (!_fixture.document || !_outputView) return;
+  const noodles::apple::GraphSnapshot snapshot = _fixture.document->snapshot(_displayFrame);
+  const noodles::apple::examples::DemoRgbaImage *source =
+      _sourceImage.empty() ? nullptr : &_sourceImage;
+  const int width = live ? 320 : 640;
+  const int height = live ? 200 : 400;
   const noodles::apple::examples::DemoRgbaImage output =
-      noodles::apple::examples::RenderDemoImage(snapshot, 640, 400);
+      noodles::apple::examples::RenderDemoImage(snapshot, width, height, source);
   _outputView.image = ImageFromRgba(output);
+}
+
+- (void)refreshOutputImage {
+  [self refreshOutputImageLive:NO];
+}
+
+- (void)presentSourceImagePicker {
+  NSOpenPanel *panel = NSOpenPanel.openPanel;
+  panel.allowedContentTypes = @[ UTTypeImage ];
+  panel.allowsMultipleSelection = NO;
+  panel.canChooseDirectories = NO;
+  panel.canChooseFiles = YES;
+  __weak NoodlesDemoViewController *weakSelf = self;
+  void (^completion)(NSModalResponse) = ^(NSModalResponse response) {
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller) return;
+    if (response == NSModalResponseOK) {
+      [controller loadSourceImageAtURL:panel.URL];
+    } else {
+      controller->_statusLabel.stringValue = @"Source image unchanged";
+    }
+  };
+  if (self.view.window) {
+    [panel beginSheetModalForWindow:self.view.window completionHandler:completion];
+  } else {
+    [panel beginWithCompletionHandler:completion];
+  }
+}
+
+- (void)loadSourceImageAtURL:(NSURL *)url {
+  if (!url) return;
+  const NSUInteger generation = ++_sourceLoadGeneration;
+  _statusLabel.stringValue =
+      [NSString stringWithFormat:@"Loading source image %@…", url.lastPathComponent];
+  NSString *path = [url.path copy];
+  __weak NoodlesDemoViewController *weakSelf = self;
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    const BOOL accessed = [url startAccessingSecurityScopedResource];
+    auto decoded = std::make_shared<noodles::apple::examples::DemoRgbaImage>();
+    auto decodeError = std::make_shared<std::string>();
+    __block NSError *coordinationError = nil;
+    NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+    [coordinator coordinateReadingItemAtURL:url
+                                    options:NSFileCoordinatorReadingWithoutChanges
+                                      error:&coordinationError
+                                 byAccessor:^(NSURL *coordinatedURL) {
+                                   *decoded = noodles::apple::examples::DecodeDemoImageAtURL(
+                                       coordinatedURL, decodeError.get());
+                                 }];
+    if (accessed) [url stopAccessingSecurityScopedResource];
+
+    NSString *failure = nil;
+    if (coordinationError) {
+      failure = coordinationError.localizedDescription;
+    } else if (decoded->empty()) {
+      failure = decodeError->empty() ? @"The selected image could not be loaded"
+                                     : [NSString stringWithUTF8String:decodeError->c_str()];
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+      NoodlesDemoViewController *controller = weakSelf;
+      if (!controller || generation != controller->_sourceLoadGeneration) return;
+      if (failure) {
+        controller->_statusLabel.stringValue = failure;
+        return;
+      }
+      controller->_sourceImage = std::move(*decoded);
+      const char *utf8Path = path.UTF8String;
+      controller->_fixture.document->setStringAttributeValue(
+          "/Demo/SourceImage", "path", utf8Path ? utf8Path : "", controller->_displayFrame);
+      [controller refreshOutputImage];
+      controller->_statusLabel.stringValue =
+          [NSString stringWithFormat:@"Source image: %@", path.lastPathComponent];
+    });
+  });
 }
 
 - (void)opacityChanged:(NSSlider *)sender {
@@ -268,45 +314,14 @@ NSImage *ImageFromRgba(
 - (void)frameChanged:(NSSlider *)sender {
   _displayFrame = sender.doubleValue;
   [_graphView setDisplayFrame:sender.doubleValue];
-  _frameLabel.stringValue =
-      [NSString stringWithFormat:@"Frame %.1f", sender.doubleValue];
+  _frameLabel.stringValue = [NSString stringWithFormat:@"Frame %.1f", sender.doubleValue];
   [self refreshOutputImage];
-}
-
-- (void)addSource:(NSButton *)sender {
-  (void)sender;
-  // Put the host-added node below Color Grade rather than blindly at the
-  // viewport center (which is often occupied). addNodeAt receives view points,
-  // so project the chosen graph-space drop point through the public viewport.
-  double x = 0.0, y = 0.0, w = 0.0, h = 0.0;
-  NSPoint drop = NSMakePoint(NSMidX(_graphView.bounds),
-                            NSMidY(_graphView.bounds));
-  if (_fixture.editor->nodePosition("/Demo/Grade", &x, &y) &&
-      _fixture.editor->nodeSize("/Demo/Grade", &w, &h)) {
-    const NSRect backing = [_graphView convertRectToBacking:_graphView.bounds];
-    const double scale = _graphView.bounds.size.width > 0.0
-                             ? backing.size.width / _graphView.bounds.size.width
-                             : 1.0;
-    const double worldX = x + w * 0.5;
-    const double worldY = y + h + 70.0;
-    drop.x = (worldX - _fixture.editor->panX()) *
-             _fixture.editor->zoom() / scale;
-    drop.y = (worldY - _fixture.editor->panY()) *
-             _fixture.editor->zoom() / scale;
-  }
-  const BOOL added = [_graphView addNode:@"/Demo/Source" atPoint:drop];
-  if (added)
-    _didFrameGraph = [_graphView frameAllWithPadding:32.0];
-  _statusLabel.stringValue = added
-                                 ? @"Added Source through the public host API"
-                                 : @"Source is already on the canvas";
 }
 
 - (void)fitGraph:(NSButton *)sender {
   (void)sender;
   _didFrameGraph = [_graphView frameAllWithPadding:32.0];
-  if (_didFrameGraph)
-    _statusLabel.stringValue = @"Fit graph with 32-point padding";
+  if (_didFrameGraph) _statusLabel.stringValue = @"Fit graph with 32-point padding";
 }
 
 - (void)viewDidAppear {
@@ -319,8 +334,7 @@ NSImage *ImageFromRgba(
     dispatch_async(dispatch_get_main_queue(), ^{
       NoodlesDemoViewController *controller = weakSelf;
       if (controller && !controller->_didFrameGraph) {
-        controller->_didFrameGraph =
-            [controller->_graphView frameAllWithPadding:32.0];
+        controller->_didFrameGraph = [controller->_graphView frameAllWithPadding:32.0];
       }
     });
   }

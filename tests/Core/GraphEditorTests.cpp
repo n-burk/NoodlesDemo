@@ -508,6 +508,99 @@ bool TestValueRowCapture() {
   return true;
 }
 
+// A display-only asset row has three distinct gestures: a stationary middle
+// tap activates host UI, a middle drag moves the node, and the edge band starts
+// connection authoring. Only the first one may fire attributeActivated.
+bool TestDisplayOnlyRowActivationPriority() {
+  auto document =
+      NewDocument({Node("/Asset/Source", true, 120.0, 90.0)});
+  ig::GraphProperty path =
+      Display("path", "asset", "picked/source image.exr");
+  path.stringValue = "/Volumes/Demo/picked/source image.exr";
+  document->addProperty("/Asset/Source", std::move(path));
+
+  ig::NoodlesGraphView view;
+  int beginCount = 0;
+  int endCount = 0;
+  int activationCount = 0;
+  int attributeEditCount = 0;
+  int topologyCount = 0;
+  std::string activatedNode;
+  std::string activatedAttribute;
+  ig::GraphEditDelegate delegate;
+  delegate.beginEdit = [&] { ++beginCount; };
+  delegate.endEdit = [&] { ++endCount; };
+  delegate.attributeActivated =
+      [&](const std::string& nodeId, const std::string& attributeName) {
+        ++activationCount;
+        activatedNode = nodeId;
+        activatedAttribute = attributeName;
+      };
+  delegate.attributeEdited =
+      [&](const std::string&, const std::string&, bool) {
+        ++attributeEditCount;
+      };
+  delegate.topologyEdited = [&] { ++topologyCount; };
+  view.setDelegate(delegate);
+  view.setDocument(document);
+
+  auto pins = view.nodePins("/Asset/Source");
+  const ig::GraphPinInfo* pathPin =
+      FindPin(pins, "path", /*isOutput=*/false);
+  INK_CHECK(pathPin != nullptr);
+  INK_CHECK(pathPin->hasValue);
+  INK_CHECK(!pathPin->isScrubable);
+  INK_CHECK(pathPin->typeText.find("asset") != std::string::npos);
+
+  double x = 0.0, y = 0.0, width = 0.0, height = 0.0;
+  INK_CHECK(view.nodePosition("/Asset/Source", &x, &y));
+  INK_CHECK(view.nodeSize("/Asset/Source", &width, &height));
+  (void)y;
+  (void)height;
+  const double middleX = x + width * 0.5;
+
+  // A stationary middle tap activates exactly once and is not a document edit.
+  view.pointerDown(middleX, pathPin->centerY);
+  view.pointerUp(middleX, pathPin->centerY);
+  INK_CHECK(activationCount == 1);
+  INK_CHECK(activatedNode == "/Asset/Source");
+  INK_CHECK(activatedAttribute == "path");
+  INK_CHECK(beginCount == 0 && endCount == 0);
+  INK_CHECK(attributeEditCount == 0);
+  INK_CHECK(topologyCount == 0);
+
+  // A real middle drag is a node move and must suppress activation.
+  view.pointerDown(middleX, pathPin->centerY);
+  view.pointerMove(middleX + 60.0, pathPin->centerY + 35.0);
+  view.pointerUp(middleX + 60.0, pathPin->centerY + 35.0);
+  double movedX = 0.0, movedY = 0.0, movedWidth = 0.0;
+  INK_CHECK(view.nodePosition("/Asset/Source", &movedX, &movedY));
+  INK_CHECK(view.nodeSize("/Asset/Source", &movedWidth, nullptr));
+  INK_CHECK(movedX != x || movedY != y);
+  INK_CHECK(activationCount == 1);
+  INK_CHECK(beginCount == 1 && endCount == 1);
+  INK_CHECK(attributeEditCount == 0);
+  INK_CHECK(topologyCount == 0);
+
+  // The moved row's right edge remains a link gesture, never an activation.
+  pins = view.nodePins("/Asset/Source");
+  pathPin = FindPin(pins, "path", /*isOutput=*/false);
+  INK_CHECK(pathPin != nullptr);
+  const double rightBandX = movedX + movedWidth * 0.97;
+  view.pointerDown(rightBandX, pathPin->centerY);
+  ig::GraphLinkInfo preview;
+  INK_CHECK(view.activeLinkPreview(&preview));
+  view.pointerUp(rightBandX, pathPin->centerY);
+  INK_CHECK(!view.activeLinkPreview(&preview));
+  INK_CHECK(activationCount == 1);
+  INK_CHECK(beginCount == 1 && endCount == 1);
+  INK_CHECK(attributeEditCount == 0);
+  INK_CHECK(topologyCount == 0);
+
+  std::printf("  display-only row activation / drag / edge priority ok\n");
+  return true;
+}
+
 // Scrub state machine: pressing a scrubable row's middle + dragging authors a
 // changed value to the document inside exactly one begin/end edit envelope.
 // Semantic edits are surfaced directly through the platform-neutral delegate.
@@ -1546,6 +1639,8 @@ int main() {
       {"pointer_selects_node", TestPointerSelectsNode},
       {"pin_drag_authors_edge", TestPinDragAuthorsEdge},
       {"value_row_capture", TestValueRowCapture},
+      {"display_only_row_activation_priority",
+       TestDisplayOnlyRowActivationPriority},
       {"scrub_authors_value", TestScrubAuthorsValue},
       {"title_only_node_drag", TestTitleOnlyNodeDrag},
       {"pinch_zoom_not_compounding", TestPinchZoomNotCompounding},

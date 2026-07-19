@@ -57,9 +57,11 @@ na::GraphProperty* FindProperty(na::GraphSnapshot& snapshot,
   return nullptr;
 }
 
-std::uint64_t RenderHash(const na::GraphSnapshot& snapshot) {
+std::uint64_t RenderHash(
+    const na::GraphSnapshot& snapshot,
+    const na::examples::DemoRgbaImage* sourceImage = nullptr) {
   return na::examples::DemoImageChecksum(
-      na::examples::RenderDemoImage(snapshot, 128, 80));
+      na::examples::RenderDemoImage(snapshot, 128, 80, sourceImage));
 }
 
 bool PropertyChangeAltersOutput(const na::GraphSnapshot& baseline,
@@ -76,23 +78,150 @@ bool PropertyChangeAltersOutput(const na::GraphSnapshot& baseline,
   return RenderHash(changed) != baselineHash;
 }
 
-bool TestFixtureTopologyAndEditableBoolean() {
+bool HasEdge(const na::GraphSnapshot& snapshot,
+             const std::string& inputNodeId,
+             const std::string& inputPort,
+             const std::string& outputNodeId,
+             const std::string& outputPort) {
+  for (const na::GraphEdge& edge : snapshot.edges) {
+    if (!edge.isRelationship && edge.sourceNodeId == inputNodeId &&
+        edge.sourcePort == inputPort && edge.targetNodeId == outputNodeId &&
+        edge.targetPort == outputPort) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HasRelationship(const na::GraphSnapshot& snapshot,
+                     const std::string& sourceNodeId,
+                     const std::string& relationshipName,
+                     const std::string& targetNodeId) {
+  for (const na::GraphEdge& edge : snapshot.edges) {
+    if (edge.isRelationship && edge.sourceNodeId == sourceNodeId &&
+        edge.sourcePort == relationshipName &&
+        edge.targetNodeId == targetNodeId && edge.targetPort.empty()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool RemoveEdge(na::GraphSnapshot* snapshot,
+                const std::string& inputNodeId,
+                const std::string& inputPort,
+                const std::string& outputNodeId,
+                const std::string& outputPort) {
+  if (!snapshot) return false;
+  for (auto edge = snapshot->edges.begin(); edge != snapshot->edges.end();
+       ++edge) {
+    if (!edge->isRelationship && edge->sourceNodeId == inputNodeId &&
+        edge->sourcePort == inputPort && edge->targetNodeId == outputNodeId &&
+        edge->targetPort == outputPort) {
+      snapshot->edges.erase(edge);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HasTypedPort(const na::GraphSnapshot& snapshot,
+                  const std::string& nodeId,
+                  const std::string& propertyName,
+                  const std::string& type,
+                  na::GraphPropertyDirection direction) {
+  const na::GraphProperty* property =
+      FindProperty(snapshot, nodeId, propertyName);
+  return property && property->kind == na::GraphPropertyKind::Attribute &&
+         property->type == type && property->direction == direction;
+}
+
+bool TestFixtureTopologyAndEditableControls() {
   auto fixture = na::examples::CreateDemoGraphFixture();
   CHECK(fixture.document);
   CHECK(fixture.editor);
-  CHECK(fixture.editor->nodeCount() == 4);
-  CHECK(fixture.editor->linkCount() == 3);
-  CHECK(fixture.document->containsNode("/Demo/Source"));
+  CHECK(fixture.editor->nodeCount() == 6);
+  CHECK(fixture.editor->linkCount() == 6);
 
   const na::GraphSnapshot initial = fixture.document->snapshot(12.0);
+  CHECK(initial.nodes.size() == 6);
+  CHECK(initial.edges.size() == 6);
   CHECK(FindProperty(initial, "/Demo/Noise", "noise:frequency"));
   CHECK(FindProperty(initial, "/Demo/Noise", "noise:amplitude"));
-  const na::GraphProperty* noiseOutput =
-      FindProperty(initial, "/Demo/Noise", "output");
-  CHECK(noiseOutput);
-  CHECK(noiseOutput->type == "image");
-  CHECK(noiseOutput->direction == na::GraphPropertyDirection::Output);
-  CHECK(!FindProperty(initial, "/Demo/Source", "source:level"));
+
+  const na::GraphProperty* sourcePath =
+      FindProperty(initial, "/Demo/SourceImage", "path");
+  CHECK(sourcePath);
+  CHECK(sourcePath->kind == na::GraphPropertyKind::Attribute);
+  CHECK(sourcePath->type == "asset");
+  CHECK(sourcePath->hasValue);
+  CHECK(!sourcePath->isScrubable);
+  CHECK(sourcePath->stringValue.empty());
+  CHECK(sourcePath->displayValue == "Built-in Landscape");
+
+  const auto sourcePins = fixture.editor->nodePins("/Demo/SourceImage");
+  const na::GraphPinInfo* pathPin = FindPin(sourcePins, "path");
+  CHECK(pathPin);
+  CHECK(pathPin->hasValue);
+  CHECK(!pathPin->isScrubable);
+  CHECK(pathPin->typeText.find("asset") != std::string::npos);
+  CHECK(pathPin->typeText.find("Built-in Landscape") != std::string::npos);
+
+  // Every image-producing stage exposes a typed, output-only row. Composite's
+  // mask remains a whole-node relationship to the Ellipse Mask shape.
+  const struct {
+    const char* nodeId;
+    const char* propertyName;
+    const char* type;
+    na::GraphPropertyDirection direction;
+  } typedPorts[] = {
+      {"/Demo/SourceImage", "output", "image",
+       na::GraphPropertyDirection::Output},
+      {"/Demo/Noise", "input", "image",
+       na::GraphPropertyDirection::Input},
+      {"/Demo/Noise", "output", "image",
+       na::GraphPropertyDirection::Output},
+      {"/Demo/Grade", "input", "image",
+       na::GraphPropertyDirection::Input},
+      {"/Demo/Grade", "output", "image",
+       na::GraphPropertyDirection::Output},
+      {"/Demo/Composite", "background", "image",
+       na::GraphPropertyDirection::Input},
+      {"/Demo/Composite", "foreground", "image",
+       na::GraphPropertyDirection::Input},
+      {"/Demo/Composite", "output", "image",
+       na::GraphPropertyDirection::Output},
+      {"/Demo/Display", "surface", "image",
+       na::GraphPropertyDirection::Input},
+  };
+  for (const auto& port : typedPorts) {
+    CHECK(HasTypedPort(initial, port.nodeId, port.propertyName, port.type,
+                       port.direction));
+  }
+
+  const na::GraphProperty* maskRelationship =
+      FindProperty(initial, "/Demo/Composite", "mask");
+  CHECK(maskRelationship);
+  CHECK(maskRelationship->kind == na::GraphPropertyKind::Relationship);
+  CHECK(maskRelationship->type == "rel");
+  CHECK(HasRelationship(initial, "/Demo/Composite", "mask", "/Demo/Mask"));
+
+  const struct {
+    const char* inputNodeId;
+    const char* inputPort;
+    const char* outputNodeId;
+    const char* outputPort;
+  } expectedEdges[] = {
+      {"/Demo/Noise", "input", "/Demo/SourceImage", "output"},
+      {"/Demo/Grade", "input", "/Demo/Noise", "output"},
+      {"/Demo/Composite", "background", "/Demo/Noise", "output"},
+      {"/Demo/Composite", "foreground", "/Demo/Grade", "output"},
+      {"/Demo/Display", "surface", "/Demo/Composite", "output"},
+  };
+  for (const auto& edge : expectedEdges) {
+    CHECK(HasEdge(initial, edge.inputNodeId, edge.inputPort,
+                  edge.outputNodeId, edge.outputPort));
+  }
 
   const auto noisePins = fixture.editor->nodePins("/Demo/Noise");
   const na::GraphPinInfo* output = FindPin(noisePins, "output", true);
@@ -100,13 +229,29 @@ bool TestFixtureTopologyAndEditableBoolean() {
   CHECK(output->typeText == "image");
   CHECK(!FindPin(noisePins, "output", false));
 
-  int imageDataLinks = 0;
+  int dataLinks = 0;
+  int relationshipLinks = 0;
   for (const na::GraphLinkInfo& link : fixture.editor->links()) {
-    if (link.isRelationship) continue;
-    CHECK(link.sourcePort == "output");
-    ++imageDataLinks;
+    if (link.isRelationship) {
+      CHECK(link.sourceNodeId == "/Demo/Composite");
+      CHECK(link.sourcePort == "mask");
+      CHECK(link.targetNodeId == "/Demo/Mask");
+      CHECK(link.targetPort.empty());
+      ++relationshipLinks;
+    } else {
+      CHECK(link.sourcePort == "output");
+      ++dataLinks;
+    }
   }
-  CHECK(imageDataLinks == 2);
+  CHECK(dataLinks == 5);
+  CHECK(relationshipLinks == 1);
+
+  const na::GraphProperty* radius =
+      FindProperty(initial, "/Demo/Mask", "radius");
+  CHECK(radius);
+  CHECK(radius->type == "float");
+  CHECK(radius->hasValue);
+  CHECK(radius->isScrubable);
 
   const auto pins = fixture.editor->nodePins("/Demo/Display");
   const na::GraphPinInfo* visible = FindPin(pins, "visible");
@@ -138,23 +283,73 @@ bool TestFixtureTopologyAndEditableBoolean() {
   return true;
 }
 
-bool TestFixtureHiddenSourceUsesPublicAddNodeSeam() {
+bool TestFixtureAssetPathRoundTripsLosslessly() {
   auto fixture = na::examples::CreateDemoGraphFixture();
-  CHECK(fixture.editor->nodeCount() == 4);
-  CHECK(fixture.editor->addNodeAt("/Demo/Source", 320.0, 240.0));
-  CHECK(fixture.editor->nodeCount() == 5);
+  const std::string exactPath =
+      "/Volumes/Demo Library/plates/source image with spaces and #symbols "
+      "0001.exr";
 
-  const na::GraphSnapshot visible = fixture.document->snapshot(12.0);
-  CHECK(FindProperty(visible, "/Demo/Source", "source:level"));
-  const na::GraphProperty* sourceOutput =
-      FindProperty(visible, "/Demo/Source", "output");
-  CHECK(sourceOutput);
-  CHECK(sourceOutput->type == "image");
-  CHECK(sourceOutput->direction == na::GraphPropertyDirection::Output);
+  CHECK(fixture.document->setStringAttributeValue(
+      "/Demo/SourceImage", "path", exactPath, 12.0));
+  const na::GraphSnapshot authored = fixture.document->snapshot(12.0);
+  const na::GraphProperty* path =
+      FindProperty(authored, "/Demo/SourceImage", "path");
+  CHECK(path);
+  CHECK(path->type == "asset");
+  CHECK(path->hasValue);
+  CHECK(!path->isScrubable);
+  CHECK(path->stringValue == exactPath);
+  CHECK(!path->displayValue.empty());
+  CHECK(path->displayValue != exactPath);
+
+  // Re-authoring the same exact value is a no-op; clearing it is also exact
+  // even though the row presents a friendly placeholder.
+  CHECK(!fixture.document->setStringAttributeValue(
+      "/Demo/SourceImage", "path", exactPath, 12.0));
+  CHECK(fixture.document->setStringAttributeValue(
+      "/Demo/SourceImage", "path", "", 12.0));
+  const na::GraphSnapshot cleared = fixture.document->snapshot(12.0);
+  path = FindProperty(cleared, "/Demo/SourceImage", "path");
+  CHECK(path);
+  CHECK(path->stringValue.empty());
+  CHECK(path->displayValue == "(none)");
+  return true;
+}
+
+bool TestFixtureRadiusScrubChangesOutput() {
+  auto fixture = na::examples::CreateDemoGraphFixture();
+  const na::GraphSnapshot baseline = fixture.document->snapshot(12.0);
+  const std::uint64_t baselineHash = RenderHash(baseline);
+  const na::GraphProperty* before =
+      FindProperty(baseline, "/Demo/Mask", "radius");
+  CHECK(before);
+
+  const auto pins = fixture.editor->nodePins("/Demo/Mask");
+  const na::GraphPinInfo* radius = FindPin(pins, "radius");
+  CHECK(radius);
+  CHECK(radius->isScrubable);
+  CHECK(radius->typeText.find("float") != std::string::npos);
+
   double x = 0.0;
   double y = 0.0;
-  CHECK(fixture.editor->nodePosition("/Demo/Source", &x, &y));
-  CHECK(std::isfinite(x) && std::isfinite(y));
+  double width = 0.0;
+  double height = 0.0;
+  CHECK(fixture.editor->nodePosition("/Demo/Mask", &x, &y));
+  CHECK(fixture.editor->nodeSize("/Demo/Mask", &width, &height));
+  (void)y;
+  (void)height;
+
+  const double rowX = x + width * 0.5;
+  fixture.editor->pointerDown(rowX, radius->centerY);
+  fixture.editor->pointerMove(rowX + 60.0, radius->centerY);
+  fixture.editor->pointerUp(rowX + 60.0, radius->centerY);
+
+  const na::GraphSnapshot edited = fixture.document->snapshot(12.0);
+  const na::GraphProperty* after =
+      FindProperty(edited, "/Demo/Mask", "radius");
+  CHECK(after);
+  CHECK(after->numericValue > before->numericValue);
+  CHECK(RenderHash(edited) != baselineHash);
   return true;
 }
 
@@ -247,14 +442,38 @@ bool TestDemoImageProcessorTracksGraphState() {
       "/Demo/Noise", "enabled", 0.0, 12.0));
   CHECK(RenderHash(toggleFixture.document->snapshot(12.0)) != baselineHash);
 
-  auto topologyFixture = na::examples::CreateDemoGraphFixture();
-  CHECK(topologyFixture.document->removeConnection(
-      "/Demo/Display", "surface", "/Demo/Grade", "output"));
-  CHECK(RenderHash(topologyFixture.document->snapshot(12.0)) != baselineHash);
+  auto radiusFixture = na::examples::CreateDemoGraphFixture();
+  CHECK(radiusFixture.document->setAttributeValue(
+      "/Demo/Mask", "radius", 0.31, 12.0));
+  CHECK(RenderHash(radiusFixture.document->snapshot(12.0)) != baselineHash);
+
+  // Multiple authored sources on one input are ordered. The newest connection
+  // controls Display.surface, so connecting Noise.output directly must produce
+  // exactly the same image as a graph whose only display source is Noise.
+  auto lastAuthoredFixture = na::examples::CreateDemoGraphFixture();
+  CHECK(lastAuthoredFixture.document->authorConnection(
+      "/Demo/Display", "surface", "/Demo/Noise", "output"));
+  const std::uint64_t lastAuthoredHash =
+      RenderHash(lastAuthoredFixture.document->snapshot(12.0));
+  CHECK(lastAuthoredHash != baselineHash);
+
+  auto directNoiseFixture = na::examples::CreateDemoGraphFixture();
+  CHECK(directNoiseFixture.document->removeConnection(
+      "/Demo/Display", "surface", "/Demo/Composite", "output"));
+  CHECK(directNoiseFixture.document->authorConnection(
+      "/Demo/Display", "surface", "/Demo/Noise", "output"));
+  CHECK(RenderHash(directNoiseFixture.document->snapshot(12.0)) ==
+        lastAuthoredHash);
 
   // Every processor control called out by the fixture contract participates
-  // in the output. Mutate snapshots directly here so even the display-only
-  // ellipse radius remains covered.
+  // in the output. Radius uses the real document-authoring path above; these
+  // snapshot mutations keep independent coverage for the remaining controls.
+  CHECK(PropertyChangeAltersOutput(baseline, "/Demo/SourceImage",
+                                   "brightness", 0.55, baselineHash));
+  CHECK(PropertyChangeAltersOutput(baseline, "/Demo/SourceImage", "bias",
+                                   0.18, baselineHash));
+  CHECK(PropertyChangeAltersOutput(baseline, "/Demo/SourceImage", "enabled",
+                                   0.0, baselineHash));
   CHECK(PropertyChangeAltersOutput(baseline, "/Demo/Noise",
                                    "noise:frequency", 6.75, baselineHash));
   CHECK(PropertyChangeAltersOutput(baseline, "/Demo/Noise",
@@ -265,12 +484,12 @@ bool TestDemoImageProcessorTracksGraphState() {
                                    baselineHash));
   CHECK(PropertyChangeAltersOutput(baseline, "/Demo/Grade", "mix", 0.18,
                                    baselineHash));
-  CHECK(PropertyChangeAltersOutput(baseline, "/Demo/Mask", "radius", 0.31,
-                                   baselineHash));
   CHECK(PropertyChangeAltersOutput(baseline, "/Demo/Mask", "feather", 0.43,
                                    baselineHash));
   CHECK(PropertyChangeAltersOutput(baseline, "/Demo/Mask", "invert", 1.0,
                                    baselineHash));
+  CHECK(PropertyChangeAltersOutput(baseline, "/Demo/Composite", "opacity",
+                                   0.25, baselineHash));
   CHECK(PropertyChangeAltersOutput(baseline, "/Demo/Display", "exposure",
                                    0.75, baselineHash));
   CHECK(PropertyChangeAltersOutput(baseline, "/Demo/Display", "visible", 0.0,
@@ -284,9 +503,12 @@ bool TestDemoImageProcessorTracksGraphState() {
     const char* targetPort;
     bool relationship;
   } edgeCases[] = {
+      {"/Demo/Noise", "input", "/Demo/SourceImage", "output", false},
       {"/Demo/Grade", "input", "/Demo/Noise", "output", false},
-      {"/Demo/Display", "surface", "/Demo/Grade", "output", false},
-      {"/Demo/Grade", "mask", "/Demo/Mask", "", true},
+      {"/Demo/Composite", "background", "/Demo/Noise", "output", false},
+      {"/Demo/Composite", "foreground", "/Demo/Grade", "output", false},
+      {"/Demo/Composite", "mask", "/Demo/Mask", "", true},
+      {"/Demo/Display", "surface", "/Demo/Composite", "output", false},
   };
   for (const auto& edgeCase : edgeCases) {
     na::GraphSnapshot disconnected = baseline;
@@ -309,6 +531,128 @@ bool TestDemoImageProcessorTracksGraphState() {
   return true;
 }
 
+bool TestExternalSourceImageChangesOutput() {
+  auto fixture = na::examples::CreateDemoGraphFixture();
+  const na::GraphSnapshot snapshot = fixture.document->snapshot(12.0);
+  const std::uint64_t builtInHash = RenderHash(snapshot);
+
+  na::examples::DemoRgbaImage external;
+  external.width = 3;
+  external.height = 2;
+  external.pixels = {
+      255, 24,  32,  255, 250, 220, 40,  255, 20,  230, 220, 255,
+      30,  50,  240, 255, 220, 40,  210, 255, 30,  210, 55,  255,
+  };
+
+  const na::examples::DemoRgbaImage first =
+      na::examples::RenderDemoImage(snapshot, 128, 80, &external);
+  const na::examples::DemoRgbaImage second =
+      na::examples::RenderDemoImage(snapshot, 128, 80, &external);
+  CHECK(!first.empty());
+  CHECK(first.pixels == second.pixels);
+  CHECK(na::examples::DemoImageChecksum(first) ==
+        RenderHash(snapshot, &external));
+  CHECK(na::examples::DemoImageChecksum(first) != builtInHash);
+  return true;
+}
+
+bool TestMissingInputAndCycleAreDeterministic() {
+  auto fixture = na::examples::CreateDemoGraphFixture();
+  const na::GraphSnapshot baseline = fixture.document->snapshot(12.0);
+  const std::uint64_t baselineHash = RenderHash(baseline);
+
+  // Noise is required by both Composite branches. Removing its source makes
+  // the Display resolve to the deterministic no-signal image.
+  na::GraphSnapshot missingInput = baseline;
+  CHECK(RemoveEdge(&missingInput, "/Demo/Noise", "input",
+                   "/Demo/SourceImage", "output"));
+  const na::examples::DemoRgbaImage missingFirst =
+      na::examples::RenderDemoImage(missingInput, 128, 80);
+  const na::examples::DemoRgbaImage missingSecond =
+      na::examples::RenderDemoImage(missingInput, 128, 80);
+  CHECK(!missingFirst.empty());
+  CHECK(missingFirst.pixels == missingSecond.pixels);
+  CHECK(na::examples::DemoImageChecksum(missingFirst) != baselineHash);
+
+  // The most recently authored source wins. Appending Grade.output as the
+  // Noise input creates Noise -> Grade -> Noise and must terminate safely.
+  na::GraphSnapshot cyclic = baseline;
+  na::GraphEdge cycleEdge;
+  cycleEdge.sourceNodeId = "/Demo/Noise";
+  cycleEdge.sourcePort = "input";
+  cycleEdge.targetNodeId = "/Demo/Grade";
+  cycleEdge.targetPort = "output";
+  cyclic.edges.push_back(cycleEdge);
+  const na::examples::DemoRgbaImage cycleFirst =
+      na::examples::RenderDemoImage(cyclic, 128, 80);
+  const na::examples::DemoRgbaImage cycleSecond =
+      na::examples::RenderDemoImage(cyclic, 128, 80);
+  CHECK(!cycleFirst.empty());
+  CHECK(cycleFirst.pixels == cycleSecond.pixels);
+  CHECK(na::examples::DemoImageChecksum(cycleFirst) != baselineHash);
+  CHECK(cycleFirst.pixels == missingFirst.pixels);
+  return true;
+}
+
+bool TestDirectDisplayIgnoresDisconnectedDownstreamControls() {
+  struct ControlChange {
+    const char* nodeId;
+    const char* propertyName;
+    double value;
+  };
+
+  // With Noise connected directly to Display, Grade, Mask, and Composite are
+  // disconnected consumers and cannot influence the image.
+  auto noiseFixture = na::examples::CreateDemoGraphFixture();
+  CHECK(noiseFixture.document->removeConnection(
+      "/Demo/Display", "surface", "/Demo/Composite", "output"));
+  CHECK(noiseFixture.document->authorConnection(
+      "/Demo/Display", "surface", "/Demo/Noise", "output"));
+  const std::uint64_t directNoiseHash =
+      RenderHash(noiseFixture.document->snapshot(12.0));
+  const ControlChange noiseDownstream[] = {
+      {"/Demo/Grade", "gain", 2.4},
+      {"/Demo/Grade", "mix", 0.05},
+      {"/Demo/Mask", "radius", 0.18},
+      {"/Demo/Mask", "feather", 0.52},
+      {"/Demo/Mask", "invert", 1.0},
+      {"/Demo/Composite", "opacity", 0.08},
+  };
+  for (const ControlChange& change : noiseDownstream) {
+    CHECK(noiseFixture.document->setAttributeValue(
+        change.nodeId, change.propertyName, change.value, 12.0));
+    CHECK(RenderHash(noiseFixture.document->snapshot(12.0)) ==
+          directNoiseHash);
+  }
+
+  // With Source Image connected directly, Noise and every later processing
+  // stage are likewise irrelevant to the visible result.
+  auto sourceFixture = na::examples::CreateDemoGraphFixture();
+  CHECK(sourceFixture.document->removeConnection(
+      "/Demo/Display", "surface", "/Demo/Composite", "output"));
+  CHECK(sourceFixture.document->authorConnection(
+      "/Demo/Display", "surface", "/Demo/SourceImage", "output"));
+  const std::uint64_t directSourceHash =
+      RenderHash(sourceFixture.document->snapshot(12.0));
+  const ControlChange sourceDownstream[] = {
+      {"/Demo/Noise", "noise:frequency", 9.25},
+      {"/Demo/Noise", "noise:amplitude", 0.05},
+      {"/Demo/Noise", "enabled", 0.0},
+      {"/Demo/Grade", "gain", 2.6},
+      {"/Demo/Grade", "mix", 0.12},
+      {"/Demo/Mask", "radius", 0.22},
+      {"/Demo/Mask", "invert", 1.0},
+      {"/Demo/Composite", "opacity", 0.15},
+  };
+  for (const ControlChange& change : sourceDownstream) {
+    CHECK(sourceFixture.document->setAttributeValue(
+        change.nodeId, change.propertyName, change.value, 12.0));
+    CHECK(RenderHash(sourceFixture.document->snapshot(12.0)) ==
+          directSourceHash);
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -317,14 +661,22 @@ int main() {
     bool (*run)();
   };
   const TestCase tests[] = {
-      {"fixture_topology_and_editable_boolean",
-       TestFixtureTopologyAndEditableBoolean},
-      {"fixture_hidden_source_add_node",
-       TestFixtureHiddenSourceUsesPublicAddNodeSeam},
+      {"fixture_topology_and_editable_controls",
+       TestFixtureTopologyAndEditableControls},
+      {"fixture_asset_path_round_trip",
+       TestFixtureAssetPathRoundTripsLosslessly},
+      {"fixture_radius_scrub_changes_output",
+       TestFixtureRadiusScrubChangesOutput},
       {"fixture_animated_scrub_at_display_frame",
        TestFixtureAnimatedScrubAuthorsAtDisplayFrame},
       {"demo_image_processor_tracks_graph_state",
        TestDemoImageProcessorTracksGraphState},
+      {"external_source_image_changes_output",
+       TestExternalSourceImageChangesOutput},
+      {"missing_input_and_cycle_are_deterministic",
+       TestMissingInputAndCycleAreDeterministic},
+      {"direct_display_ignores_downstream_controls",
+       TestDirectDisplayIgnoresDisconnectedDownstreamControls},
   };
 
   bool passed = true;
