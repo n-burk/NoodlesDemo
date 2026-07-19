@@ -1,16 +1,16 @@
-#import <NoodlesApple/UIKit/NoodlesAppleGraphView.h>
+#import <NoodlesDemo/UIKit/NoodlesDemoGraphView.h>
 #import <UIKit/UIKit.h>
 
-#include <noodles/apple/GraphEditor.h>
+#include <noodles/demo/GraphEditor.h>
 
 #include <memory>
 
-@interface NoodlesAppleCompileSmokePencilTarget
-    : UIView <NoodlesApplePencilForwardingTarget>
+@interface NoodlesDemoCompileSmokePencilTarget
+    : UIView <NoodlesDemoPencilForwardingTarget>
 @end
 
-@implementation NoodlesAppleCompileSmokePencilTarget
-- (void)noodlesAppleCancelForwardedPencilGesture {
+@implementation NoodlesDemoCompileSmokePencilTarget
+- (void)noodlesDemoCancelForwardedPencilGesture {
 }
 @end
 
@@ -18,14 +18,14 @@
 // It intentionally does not create a UIWindow or GL drawable; device/demo tests
 // own runtime validation, while this pins the public Objective-C++ ABI and the
 // Pencil target contract on every iOS build.
-void NoodlesAppleCompileUIKitShellAPI() {
-  auto editor = std::make_shared<noodles::apple::GraphEditor>();
-  NoodlesAppleGraphView *view =
-      [[NoodlesAppleGraphView alloc] initWithFrame:CGRectMake(0, 0, 1024, 768)
+void NoodlesDemoCompileUIKitShellAPI() {
+  auto editor = std::make_shared<noodles::demo::GraphEditor>();
+  NoodlesDemoGraphView *view =
+      [[NoodlesDemoGraphView alloc] initWithFrame:CGRectMake(0, 0, 1024, 768)
                                             editor:editor
                                         assetsPath:@"/tmp/noodles-assets"];
-  NoodlesAppleCompileSmokePencilTarget *target =
-      [[NoodlesAppleCompileSmokePencilTarget alloc] initWithFrame:CGRectZero];
+  NoodlesDemoCompileSmokePencilTarget *target =
+      [[NoodlesDemoCompileSmokePencilTarget alloc] initWithFrame:CGRectZero];
   view.pencilForwardingTarget = target;
   view.onAttributeActivated = ^(NSString *nodeId, NSString *attributeName) {
     (void)nodeId;

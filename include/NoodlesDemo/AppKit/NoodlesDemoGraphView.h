@@ -1,4 +1,4 @@
-// Copyright (c) 2026 NoodlesApple contributors.
+// Copyright (c) 2026 NoodlesDemo contributors.
 // SPDX-License-Identifier: MIT
 
 // The public adapter intentionally hosts Noodles' OpenGL renderer. Suppress the
@@ -6,41 +6,41 @@
 // can still choose the UIKit shell or provide another GraphEditor presenter.
 #ifndef GL_SILENCE_DEPRECATION
 #define GL_SILENCE_DEPRECATION 1
-#define NOODLES_APPLE_UNDEFINE_GL_SILENCE_DEPRECATION 1
+#define NOODLES_DEMO_UNDEFINE_GL_SILENCE_DEPRECATION 1
 #endif
 #import <AppKit/AppKit.h>
-#ifdef NOODLES_APPLE_UNDEFINE_GL_SILENCE_DEPRECATION
+#ifdef NOODLES_DEMO_UNDEFINE_GL_SILENCE_DEPRECATION
 #undef GL_SILENCE_DEPRECATION
-#undef NOODLES_APPLE_UNDEFINE_GL_SILENCE_DEPRECATION
+#undef NOODLES_DEMO_UNDEFINE_GL_SILENCE_DEPRECATION
 #endif
 
 #ifdef __cplusplus
 #include <memory>
 
-namespace noodles::apple {
+namespace noodles::demo {
 class GraphEditor;
 }
 #endif
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// OpenGL 3.2 Core/AppKit presentation shell for noodles::apple::GraphEditor.
+/// OpenGL 3.2 Core/AppKit presentation shell for noodles::demo::GraphEditor.
 /// Mouse press/drag maps to the editor pointer stream, trackpad scroll pans,
 /// magnify performs anchored zoom, and right-click is the desktop equivalent of
 /// the iPad title-row long press.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-@interface NoodlesAppleGraphView : NSOpenGLView
+@interface NoodlesDemoGraphView : NSOpenGLView
 
 #ifdef __cplusplus
 - (instancetype)initWithFrame:(NSRect)frame
-                       editor:(std::shared_ptr<noodles::apple::GraphEditor>)editor
+                       editor:(std::shared_ptr<noodles::demo::GraphEditor>)editor
                    assetsPath:(NSString *)assetsPath NS_DESIGNATED_INITIALIZER;
 
-- (instancetype)initWithEditor:(std::shared_ptr<noodles::apple::GraphEditor>)editor
+- (instancetype)initWithEditor:(std::shared_ptr<noodles::demo::GraphEditor>)editor
                     assetsPath:(NSString *)assetsPath;
 
-- (std::shared_ptr<noodles::apple::GraphEditor>)graphEditor;
+- (std::shared_ptr<noodles::demo::GraphEditor>)graphEditor;
 #endif
 
 - (instancetype)initWithFrame:(NSRect)frame NS_UNAVAILABLE;

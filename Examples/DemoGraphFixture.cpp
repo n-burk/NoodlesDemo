@@ -1,14 +1,14 @@
 #include "DemoGraphFixture.h"
 
-#include <noodles/apple/GraphDocument.h>
-#include <noodles/apple/GraphEditor.h>
-#include <noodles/apple/InMemoryGraphDocument.h>
+#include <noodles/demo/GraphDocument.h>
+#include <noodles/demo/GraphEditor.h>
+#include <noodles/demo/InMemoryGraphDocument.h>
 
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace noodles::apple::examples {
+namespace noodles::demo::examples {
 namespace {
 
 GraphProperty Number(std::string name, std::string type, double value,
@@ -138,4 +138,4 @@ DemoGraphFixture CreateDemoGraphFixture() {
   return {std::move(document), std::move(editor)};
 }
 
-}  // namespace noodles::apple::examples
+}  // namespace noodles::demo::examples

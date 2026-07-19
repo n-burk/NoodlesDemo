@@ -1,12 +1,12 @@
-// Copyright (c) 2026 NoodlesApple contributors.
+// Copyright (c) 2026 NoodlesDemo contributors.
 // SPDX-License-Identifier: MIT
 
 #define GL_SILENCE_DEPRECATION 1
-#import <NoodlesApple/AppKit/NoodlesAppleGraphView.h>
+#import <NoodlesDemo/AppKit/NoodlesDemoGraphView.h>
 
 #import <OpenGL/gl3.h>
 
-#include <noodles/apple/GraphEditor.h>
+#include <noodles/demo/GraphEditor.h>
 
 #include <algorithm>
 #include <exception>
@@ -43,13 +43,13 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
 
 } // namespace
 
-@interface NoodlesAppleGraphView ()
+@interface NoodlesDemoGraphView ()
 - (void)scheduleRender;
 - (void)renderIfNeeded;
 @end
 
-@implementation NoodlesAppleGraphView {
-  std::shared_ptr<noodles::apple::GraphEditor> _editor;
+@implementation NoodlesDemoGraphView {
+  std::shared_ptr<noodles::demo::GraphEditor> _editor;
   NSString *_assetsPath;
   BOOL _editorInitialized;
   BOOL _needsRender;
@@ -64,7 +64,7 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
 }
 
 - (instancetype)initWithEditor:
-                    (std::shared_ptr<noodles::apple::GraphEditor>)editor
+                    (std::shared_ptr<noodles::demo::GraphEditor>)editor
                     assetsPath:(NSString *)assetsPath {
   return [self initWithFrame:NSZeroRect
                       editor:std::move(editor)
@@ -73,7 +73,7 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
 
 - (instancetype)initWithFrame:(NSRect)frame
                        editor:
-                           (std::shared_ptr<noodles::apple::GraphEditor>)editor
+                           (std::shared_ptr<noodles::demo::GraphEditor>)editor
                    assetsPath:(NSString *)assetsPath {
   self = [super initWithFrame:frame pixelFormat:GraphPixelFormat()];
   if (!self)
@@ -91,7 +91,7 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
   [_gestureTimer invalidate];
   _gestureTimer = nil;
   if (_editor)
-    _editor->setDelegate(noodles::apple::GraphEditDelegate{});
+    _editor->setDelegate(noodles::demo::GraphEditDelegate{});
 
   NSOpenGLContext *context = self.openGLContext;
   [context makeCurrentContext];
@@ -118,7 +118,7 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
   return _assetsPath;
 }
 
-- (std::shared_ptr<noodles::apple::GraphEditor>)graphEditor {
+- (std::shared_ptr<noodles::demo::GraphEditor>)graphEditor {
   return _editor;
 }
 
@@ -127,35 +127,35 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
 - (void)wireEditorDelegate {
   if (!_editor)
     return;
-  __weak NoodlesAppleGraphView *weakSelf = self;
-  noodles::apple::GraphEditDelegate delegate;
+  __weak NoodlesDemoGraphView *weakSelf = self;
+  noodles::demo::GraphEditDelegate delegate;
   delegate.beginEdit = [weakSelf]() {
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (view.onBeginEdit)
       view.onBeginEdit();
   };
   delegate.endEdit = [weakSelf]() {
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (view.onEndEdit)
       view.onEndEdit();
   };
   delegate.status = [weakSelf](const std::string &message) {
     NSString *text = ToNSString(message);
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleGraphView *view = weakSelf;
+      NoodlesDemoGraphView *view = weakSelf;
       if (view.onStatus)
         view.onStatus(text);
     });
   };
   delegate.requestRender = [weakSelf]() {
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (view)
       [view scheduleRender];
   };
   delegate.selectionChanged = [weakSelf](const std::string &nodeId) {
     NSString *identifier = ToNSString(nodeId);
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleGraphView *view = weakSelf;
+      NoodlesDemoGraphView *view = weakSelf;
       if (view.onSelectionChanged)
         view.onSelectionChanged(identifier);
     });
@@ -165,18 +165,18 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
                  const std::string &attributeName) {
         NSString *identifier = ToNSString(nodeId);
         NSString *attribute = ToNSString(attributeName);
-        NoodlesAppleGraphView *view = weakSelf;
+        NoodlesDemoGraphView *view = weakSelf;
         if (view.onAttributeActivated)
           view.onAttributeActivated(identifier, attribute);
       };
   delegate.topologyEdited = [weakSelf]() {
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (view.onTopologyEdited)
       view.onTopologyEdited();
   };
   delegate.graphStructureChanged = [weakSelf]() {
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleGraphView *view = weakSelf;
+      NoodlesDemoGraphView *view = weakSelf;
       if (view.onGraphStructureChanged)
         view.onGraphStructureChanged();
     });
@@ -186,7 +186,7 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
                                         bool live) {
     NSString *identifier = ToNSString(nodeId);
     NSString *attribute = ToNSString(attributeName);
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (view.onAttributeEdited) {
       view.onAttributeEdited(identifier, attribute, live ? YES : NO);
     }
@@ -223,7 +223,7 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
   } catch (const std::exception &error) {
     [self publishStatus:ToNSString(error.what())];
   } catch (...) {
-    [self publishStatus:@"NoodlesApple OpenGL initialization failed"];
+    [self publishStatus:@"NoodlesDemo OpenGL initialization failed"];
   }
 }
 
@@ -259,7 +259,7 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
 
 - (void)scheduleRender {
   if (!NSThread.isMainThread) {
-    __weak NoodlesAppleGraphView *weakSelf = self;
+    __weak NoodlesDemoGraphView *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
       [weakSelf scheduleRender];
     });
@@ -269,9 +269,9 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
   if (_gestureTimer || _renderScheduled)
     return;
   _renderScheduled = YES;
-  __weak NoodlesAppleGraphView *weakSelf = self;
+  __weak NoodlesDemoGraphView *weakSelf = self;
   dispatch_async(dispatch_get_main_queue(), ^{
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (!view)
       return;
     view->_renderScheduled = NO;
@@ -296,7 +296,7 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
 - (void)startGestureTimer {
   if (_gestureTimer)
     return;
-  __weak NoodlesAppleGraphView *weakSelf = self;
+  __weak NoodlesDemoGraphView *weakSelf = self;
   _gestureTimer = [NSTimer timerWithTimeInterval:(1.0 / 60.0)
                                          repeats:YES
                                            block:^(NSTimer *timer) {
@@ -503,9 +503,9 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
   if (NSThread.isMainThread) {
     self.onStatus(message);
   } else {
-    __weak NoodlesAppleGraphView *weakSelf = self;
+    __weak NoodlesDemoGraphView *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleGraphView *view = weakSelf;
+      NoodlesDemoGraphView *view = weakSelf;
       if (view.onStatus)
         view.onStatus(message);
     });

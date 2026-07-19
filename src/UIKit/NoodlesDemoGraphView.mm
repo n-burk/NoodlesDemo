@@ -1,14 +1,14 @@
-// Copyright (c) 2026 NoodlesApple contributors.
+// Copyright (c) 2026 NoodlesDemo contributors.
 // SPDX-License-Identifier: MIT
 
 #define GLES_SILENCE_DEPRECATION 1
-#import <NoodlesApple/UIKit/NoodlesAppleGraphView.h>
+#import <NoodlesDemo/UIKit/NoodlesDemoGraphView.h>
 
 #import <OpenGLES/EAGL.h>
 #import <OpenGLES/ES3/gl.h>
 #import <QuartzCore/QuartzCore.h>
 
-#include <noodles/apple/GraphEditor.h>
+#include <noodles/demo/GraphEditor.h>
 
 #include <cmath>
 #include <exception>
@@ -28,14 +28,14 @@ NSString *ToNSString(const std::string &value) {
 
 } // namespace
 
-@interface NoodlesAppleGraphView ()
+@interface NoodlesDemoGraphView ()
 - (void)scheduleRender;
 - (void)renderIfNeeded;
 - (void)teardownGL;
 @end
 
-@implementation NoodlesAppleGraphView {
-  std::shared_ptr<noodles::apple::GraphEditor> _editor;
+@implementation NoodlesDemoGraphView {
+  std::shared_ptr<noodles::demo::GraphEditor> _editor;
   NSString *_assetsPath;
 
   EAGLContext *_context;
@@ -51,8 +51,8 @@ NSString *ToNSString(const std::string &value) {
   BOOL _renderScheduled;
   CADisplayLink *_displayLink;
 
-  __weak UIView<NoodlesApplePencilForwardingTarget> *_pencilTargetCache;
-  UIView<NoodlesApplePencilForwardingTarget> *_activeCanvasPencilTarget;
+  __weak UIView<NoodlesDemoPencilForwardingTarget> *_pencilTargetCache;
+  UIView<NoodlesDemoPencilForwardingTarget> *_activeCanvasPencilTarget;
   __weak UITouch *_canvasPencilTouch;
 
   __weak UITouch *_graphPencilTouch;
@@ -70,7 +70,7 @@ NSString *ToNSString(const std::string &value) {
 }
 
 - (instancetype)initWithEditor:
-                    (std::shared_ptr<noodles::apple::GraphEditor>)editor
+                    (std::shared_ptr<noodles::demo::GraphEditor>)editor
                     assetsPath:(NSString *)assetsPath {
   return [self initWithFrame:CGRectZero
                       editor:std::move(editor)
@@ -79,7 +79,7 @@ NSString *ToNSString(const std::string &value) {
 
 - (instancetype)initWithFrame:(CGRect)frame
                        editor:
-                           (std::shared_ptr<noodles::apple::GraphEditor>)editor
+                           (std::shared_ptr<noodles::demo::GraphEditor>)editor
                    assetsPath:(NSString *)assetsPath {
   self = [super initWithFrame:frame];
   if (!self)
@@ -110,7 +110,7 @@ NSString *ToNSString(const std::string &value) {
 - (void)dealloc {
   [self cancelActivePencilRouting];
   if (_editor)
-    _editor->setDelegate(noodles::apple::GraphEditDelegate{});
+    _editor->setDelegate(noodles::demo::GraphEditDelegate{});
   [self teardownGL];
 }
 
@@ -118,7 +118,7 @@ NSString *ToNSString(const std::string &value) {
   return _assetsPath;
 }
 
-- (std::shared_ptr<noodles::apple::GraphEditor>)graphEditor {
+- (std::shared_ptr<noodles::demo::GraphEditor>)graphEditor {
   return _editor;
 }
 
@@ -128,35 +128,35 @@ NSString *ToNSString(const std::string &value) {
   if (!_editor)
     return;
 
-  __weak NoodlesAppleGraphView *weakSelf = self;
-  noodles::apple::GraphEditDelegate delegate;
+  __weak NoodlesDemoGraphView *weakSelf = self;
+  noodles::demo::GraphEditDelegate delegate;
   delegate.beginEdit = [weakSelf]() {
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (view.onBeginEdit)
       view.onBeginEdit();
   };
   delegate.endEdit = [weakSelf]() {
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (view.onEndEdit)
       view.onEndEdit();
   };
   delegate.status = [weakSelf](const std::string &message) {
     NSString *text = ToNSString(message);
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleGraphView *view = weakSelf;
+      NoodlesDemoGraphView *view = weakSelf;
       if (view.onStatus)
         view.onStatus(text);
     });
   };
   delegate.requestRender = [weakSelf]() {
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (view)
       [view scheduleRender];
   };
   delegate.selectionChanged = [weakSelf](const std::string &nodeId) {
     NSString *identifier = ToNSString(nodeId);
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleGraphView *view = weakSelf;
+      NoodlesDemoGraphView *view = weakSelf;
       if (view.onSelectionChanged)
         view.onSelectionChanged(identifier);
     });
@@ -166,18 +166,18 @@ NSString *ToNSString(const std::string &value) {
                  const std::string &attributeName) {
         NSString *identifier = ToNSString(nodeId);
         NSString *attribute = ToNSString(attributeName);
-        NoodlesAppleGraphView *view = weakSelf;
+        NoodlesDemoGraphView *view = weakSelf;
         if (view.onAttributeActivated)
           view.onAttributeActivated(identifier, attribute);
       };
   delegate.topologyEdited = [weakSelf]() {
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (view.onTopologyEdited)
       view.onTopologyEdited();
   };
   delegate.graphStructureChanged = [weakSelf]() {
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleGraphView *view = weakSelf;
+      NoodlesDemoGraphView *view = weakSelf;
       if (view.onGraphStructureChanged)
         view.onGraphStructureChanged();
     });
@@ -187,7 +187,7 @@ NSString *ToNSString(const std::string &value) {
                                         bool live) {
     NSString *identifier = ToNSString(nodeId);
     NSString *attribute = ToNSString(attributeName);
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     // GraphEditDelegate guarantees this callback is synchronous. Preserve that
     // contract so a live scrub can update a consuming renderer before the next
     // requested frame, matching the original iPad integration.
@@ -260,7 +260,7 @@ NSString *ToNSString(const std::string &value) {
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
                             GL_RENDERBUFFER, _depthRenderbuffer);
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    [self publishStatus:@"Could not create the NoodlesApple framebuffer"];
+    [self publishStatus:@"Could not create the NoodlesDemo framebuffer"];
     return;
   }
 
@@ -279,7 +279,7 @@ NSString *ToNSString(const std::string &value) {
     } catch (const std::exception &error) {
       [self publishStatus:ToNSString(error.what())];
     } catch (...) {
-      [self publishStatus:@"NoodlesApple GL initialization failed"];
+      [self publishStatus:@"NoodlesDemo GL initialization failed"];
     }
   } else if (sizeChanged) {
     _editor->resize(width, height, (float)scale);
@@ -321,7 +321,7 @@ NSString *ToNSString(const std::string &value) {
 
 - (void)scheduleRender {
   if (!NSThread.isMainThread) {
-    __weak NoodlesAppleGraphView *weakSelf = self;
+    __weak NoodlesDemoGraphView *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
       [weakSelf scheduleRender];
     });
@@ -332,9 +332,9 @@ NSString *ToNSString(const std::string &value) {
   if (_displayLink || _renderScheduled)
     return;
   _renderScheduled = YES;
-  __weak NoodlesAppleGraphView *weakSelf = self;
+  __weak NoodlesDemoGraphView *weakSelf = self;
   dispatch_async(dispatch_get_main_queue(), ^{
-    NoodlesAppleGraphView *view = weakSelf;
+    NoodlesDemoGraphView *view = weakSelf;
     if (!view)
       return;
     view->_renderScheduled = NO;
@@ -519,31 +519,31 @@ NSString *ToNSString(const std::string &value) {
 
 #pragma mark - Pencil routing
 
-- (UIView<NoodlesApplePencilForwardingTarget> *)resolvePencilForwardingTarget {
-  UIView<NoodlesApplePencilForwardingTarget> *provided =
+- (UIView<NoodlesDemoPencilForwardingTarget> *)resolvePencilForwardingTarget {
+  UIView<NoodlesDemoPencilForwardingTarget> *provided =
       self.pencilForwardingTarget;
   if (provided)
     return provided;
 
-  UIView<NoodlesApplePencilForwardingTarget> *cached = _pencilTargetCache;
+  UIView<NoodlesDemoPencilForwardingTarget> *cached = _pencilTargetCache;
   if (cached)
     return cached;
   UIWindow *window = self.window;
   if (!window)
     return nil;
-  UIView<NoodlesApplePencilForwardingTarget> *found =
+  UIView<NoodlesDemoPencilForwardingTarget> *found =
       [self forwardingTargetInView:window];
   _pencilTargetCache = found;
   return found;
 }
 
-- (UIView<NoodlesApplePencilForwardingTarget> *)forwardingTargetInView:
+- (UIView<NoodlesDemoPencilForwardingTarget> *)forwardingTargetInView:
     (UIView *)view {
-  if ([view conformsToProtocol:@protocol(NoodlesApplePencilForwardingTarget)]) {
-    return (UIView<NoodlesApplePencilForwardingTarget> *)view;
+  if ([view conformsToProtocol:@protocol(NoodlesDemoPencilForwardingTarget)]) {
+    return (UIView<NoodlesDemoPencilForwardingTarget> *)view;
   }
   for (UIView *subview in view.subviews) {
-    UIView<NoodlesApplePencilForwardingTarget> *found =
+    UIView<NoodlesDemoPencilForwardingTarget> *found =
         [self forwardingTargetInView:subview];
     if (found)
       return found;
@@ -558,10 +558,10 @@ NSString *ToNSString(const std::string &value) {
 }
 
 - (void)cancelActivePencilRouting {
-  UIView<NoodlesApplePencilForwardingTarget> *target =
+  UIView<NoodlesDemoPencilForwardingTarget> *target =
       _activeCanvasPencilTarget;
   [self finishCanvasPencilRouting];
-  [target noodlesAppleCancelForwardedPencilGesture];
+  [target noodlesDemoCancelForwardedPencilGesture];
 
   // Removing the overlay does not require UIKit to synthesize
   // touchesCancelled:. Finish a graph-owned pointer stream explicitly too.
@@ -586,7 +586,7 @@ NSString *ToNSString(const std::string &value) {
     const CGPoint point = [touch locationInView:self];
     const BOOL graphRouteAvailable =
         !_pencilGraphActive && !_panOwnsEditor && !_pinchOwnsEditor;
-    UIView<NoodlesApplePencilForwardingTarget> *forwardingTarget = nil;
+    UIView<NoodlesDemoPencilForwardingTarget> *forwardingTarget = nil;
     const BOOL hitsGraph = [self hitsGraphElementAt:point];
     if (graphRouteAvailable && !hitsGraph) {
       forwardingTarget = [self resolvePencilForwardingTarget];
@@ -603,11 +603,11 @@ NSString *ToNSString(const std::string &value) {
 
       _pencilDownPoint = point;
       const NSUInteger sequence = ++_pencilPressSequence;
-      __weak NoodlesAppleGraphView *weakSelf = self;
+      __weak NoodlesDemoGraphView *weakSelf = self;
       dispatch_after(
           dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
           dispatch_get_main_queue(), ^{
-            NoodlesAppleGraphView *view = weakSelf;
+            NoodlesDemoGraphView *view = weakSelf;
             if (!view || !view->_editor ||
                 sequence != view->_pencilPressSequence ||
                 !view->_pencilGraphActive) {
@@ -634,7 +634,7 @@ NSString *ToNSString(const std::string &value) {
   }
 
   if (forwardedPencilTouches.count > 0) {
-    UIView<NoodlesApplePencilForwardingTarget> *target =
+    UIView<NoodlesDemoPencilForwardingTarget> *target =
         [self resolvePencilForwardingTarget];
     if (target) {
       _canvasPencilTouch = forwardedPencilTouches.anyObject;
@@ -819,9 +819,9 @@ NSString *ToNSString(const std::string &value) {
   if (NSThread.isMainThread) {
     self.onStatus(message);
   } else {
-    __weak NoodlesAppleGraphView *weakSelf = self;
+    __weak NoodlesDemoGraphView *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-      NoodlesAppleGraphView *view = weakSelf;
+      NoodlesDemoGraphView *view = weakSelf;
       if (view.onStatus)
         view.onStatus(message);
     });

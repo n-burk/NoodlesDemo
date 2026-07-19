@@ -39,23 +39,23 @@ jobs:
             -DBUILD_TESTING=OFF
           cmake --build noodles-build --parallel
           cmake --install noodles-build --prefix "$RUNNER_TEMP/noodles"
-      - name: Build, test, and install NoodlesApple
+      - name: Build, test, and install NoodlesDemo
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/noodles" \
-            -DNOODLES_APPLE_BUILD_TESTS=ON \
-            -DNOODLES_APPLE_BUILD_EXAMPLES=ON
+            -DNOODLES_DEMO_BUILD_TESTS=ON \
+            -DNOODLES_DEMO_BUILD_EXAMPLES=ON
           cmake --build build --parallel
           ctest --test-dir build --output-on-failure
-          cmake --install build --prefix "$RUNNER_TEMP/noodles-apple"
+          cmake --install build --prefix "$RUNNER_TEMP/noodles-demo"
       - name: Verify installed consumer
         run: |
           cmake -S tests/package -B package-consumer \
-            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/noodles;$RUNNER_TEMP/noodles-apple"
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/noodles;$RUNNER_TEMP/noodles-demo"
           cmake --build package-consumer --parallel
-          ./package-consumer/NoodlesApplePackageConsumer
-          ./package-consumer/NoodlesAppleAppKitPackageConsumer
+          ./package-consumer/NoodlesDemoPackageConsumer
+          ./package-consumer/NoodlesDemoAppKitPackageConsumer
 
   ios-demo:
     runs-on: macos-15
@@ -73,9 +73,9 @@ jobs:
             -DCMAKE_OSX_SYSROOT=iphonesimulator \
             -DCMAKE_OSX_ARCHITECTURES="$(uname -m)" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
-            -DNOODLES_APPLE_NOODLES_SOURCE_DIR="$GITHUB_WORKSPACE/noodles-dependency" \
-            -DNOODLES_APPLE_BUILD_EXAMPLES=ON \
-            -DNOODLES_APPLE_BUILD_TESTS=OFF
+            -DNOODLES_DEMO_NOODLES_SOURCE_DIR="$GITHUB_WORKSPACE/noodles-dependency" \
+            -DNOODLES_DEMO_BUILD_EXAMPLES=ON \
+            -DNOODLES_DEMO_BUILD_TESTS=OFF
           cmake --build build-ios --config Release \
             --target NoodlesDemo --parallel
       - name: Build iPad demo for the device SDK
@@ -85,8 +85,8 @@ jobs:
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
-            -DNOODLES_APPLE_NOODLES_SOURCE_DIR="$GITHUB_WORKSPACE/noodles-dependency" \
-            -DNOODLES_APPLE_BUILD_EXAMPLES=ON \
-            -DNOODLES_APPLE_BUILD_TESTS=OFF
+            -DNOODLES_DEMO_NOODLES_SOURCE_DIR="$GITHUB_WORKSPACE/noodles-dependency" \
+            -DNOODLES_DEMO_BUILD_EXAMPLES=ON \
+            -DNOODLES_DEMO_BUILD_TESTS=OFF
           cmake --build build-ios-device --config Release \
             --target NoodlesDemo --parallel

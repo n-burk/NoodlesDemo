@@ -4,7 +4,7 @@
 #undef PXR_PYTHON_SUPPORT_ENABLED
 #endif
 
-#include <noodles/apple/UsdGraphDocument.h>
+#include <noodles/demo/UsdGraphDocument.h>
 #include <pxr/base/gf/half.h>
 #include <pxr/base/gf/vec2d.h>
 #include <pxr/base/gf/vec2f.h>
@@ -40,7 +40,7 @@
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
-namespace noodles::apple {
+namespace noodles::demo {
 namespace {
 
 const TfToken& PositionToken() {
@@ -682,4 +682,4 @@ void UsdGraphDocument::removeObserver(ObserverToken token) {
   impl_->observers.erase(token);
 }
 
-}  // namespace noodles::apple
+}  // namespace noodles::demo

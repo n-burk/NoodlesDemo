@@ -1,4 +1,4 @@
-# Building NoodlesApple
+# Building NoodlesDemo
 
 ## Requirements
 
@@ -6,13 +6,13 @@
 - a C++17 and Objective-C++ capable Apple toolchain
 - Noodles 1.1.x, built with the Apple/GLES portability layer
 - Xcode with the macOS and iOS SDKs
-- OpenUSD only when `NOODLES_APPLE_BUILD_USD_ADAPTER=ON`
+- OpenUSD only when `NOODLES_DEMO_BUILD_USD_ADAPTER=ON`
 
 Noodles can be supplied as an installed CMake package or as a source checkout:
 
 ```sh
 cmake -S . -B build \
-  -DNOODLES_APPLE_NOODLES_SOURCE_DIR=/path/to/noodles
+  -DNOODLES_DEMO_NOODLES_SOURCE_DIR=/path/to/noodles
 ```
 
 An installed package is preferred for release verification:
@@ -26,8 +26,8 @@ cmake --install /tmp/noodles-build --prefix /tmp/noodles-install
 
 cmake -S . -B build \
   -DCMAKE_PREFIX_PATH=/tmp/noodles-install \
-  -DNOODLES_APPLE_BUILD_TESTS=ON \
-  -DNOODLES_APPLE_BUILD_EXAMPLES=ON
+  -DNOODLES_DEMO_BUILD_TESTS=ON \
+  -DNOODLES_DEMO_BUILD_EXAMPLES=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
@@ -37,7 +37,7 @@ ctest --test-dir build --output-on-failure
 ```sh
 cmake -S . -B build-macos -G Xcode \
   -DCMAKE_PREFIX_PATH=/tmp/noodles-install \
-  -DNOODLES_APPLE_BUILD_EXAMPLES=ON
+  -DNOODLES_DEMO_BUILD_EXAMPLES=ON
 cmake --build build-macos --config Debug --target NoodlesDemo
 ```
 
@@ -53,29 +53,29 @@ cmake -S . -B build-ios -G Xcode \
   -DCMAKE_OSX_SYSROOT=iphoneos \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
-  -DNOODLES_APPLE_NOODLES_SOURCE_DIR=/path/to/noodles \
-  -DNOODLES_APPLE_BUILD_EXAMPLES=ON \
-  -DNOODLES_APPLE_BUILD_TESTS=OFF
+  -DNOODLES_DEMO_NOODLES_SOURCE_DIR=/path/to/noodles \
+  -DNOODLES_DEMO_BUILD_EXAMPLES=ON \
+  -DNOODLES_DEMO_BUILD_TESTS=OFF
 cmake --build build-ios --config Debug --target NoodlesDemo
 ```
 
 ## Optional OpenUSD adapter
 
 The embedding build supplies an OpenUSD interface target and names it with
-the required `NOODLES_APPLE_USD_TARGET` setting. NoodlesApple does not discover
+the required `NOODLES_DEMO_USD_TARGET` setting. NoodlesDemo does not discover
 product targets implicitly. For example, an embedding application can supply
 its own monolithic OpenUSD target:
 
 ```cmake
-set(NOODLES_APPLE_BUILD_USD_ADAPTER ON)
-set(NOODLES_APPLE_USD_TARGET my_openusd_interface)
-add_subdirectory(path/to/noodlesApple)
+set(NOODLES_DEMO_BUILD_USD_ADAPTER ON)
+set(NOODLES_DEMO_USD_TARGET my_openusd_interface)
+add_subdirectory(path/to/noodlesDemo)
 ```
 
 `my_openusd_interface` is the embedding application's existing CMake target;
 it must publish the required OpenUSD headers and link dependencies.
 
-During the experimental 0.x series, `NoodlesApple::USD` is intentionally a
+During the experimental 0.x series, `NoodlesDemo::USD` is intentionally a
 source-embedding target rather than part of the installed binary package.
 OpenUSD's CMake target names and static SDK layouts differ across hosts, so the
 embedding application must supply the target and its transitive headers.
@@ -83,21 +83,21 @@ embedding application must supply the target and its transitive headers.
 ## Install and consume
 
 ```sh
-cmake --install build --prefix /tmp/noodles-apple-install
+cmake --install build --prefix /tmp/noodles-demo-install
 ```
 
-The repository's installed-package consumer verifies both `NoodlesApple::Core`
-and, on macOS, `NoodlesApple::AppKit`:
+The repository's installed-package consumer verifies both `NoodlesDemo::Core`
+and, on macOS, `NoodlesDemo::AppKit`:
 
 ```sh
 cmake -S tests/package -B package-consumer \
-  -DCMAKE_PREFIX_PATH="/tmp/noodles-install;/tmp/noodles-apple-install"
+  -DCMAKE_PREFIX_PATH="/tmp/noodles-install;/tmp/noodles-demo-install"
 cmake --build package-consumer --parallel
-./package-consumer/NoodlesApplePackageConsumer
-./package-consumer/NoodlesAppleAppKitPackageConsumer
+./package-consumer/NoodlesDemoPackageConsumer
+./package-consumer/NoodlesDemoAppKitPackageConsumer
 ```
 
 ```cmake
-find_package(NoodlesApple 0.1 CONFIG REQUIRED)
-target_link_libraries(my_graph_app PRIVATE NoodlesApple::Core)
+find_package(NoodlesDemo 0.1 CONFIG REQUIRED)
+target_link_libraries(my_graph_app PRIVATE NoodlesDemo::Core)
 ```

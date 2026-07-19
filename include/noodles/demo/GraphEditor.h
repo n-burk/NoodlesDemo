@@ -1,13 +1,13 @@
 #pragma once
 
-#include <noodles/apple/GraphDocument.h>
+#include <noodles/demo/GraphDocument.h>
 
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
-namespace noodles::apple {
+namespace noodles::demo {
 
 // Platform hooks only. Persistence/model semantics remain in GraphDocument;
 // UIKit/AppKit shells only schedule rendering, selection UI, and edit
@@ -156,4 +156,4 @@ class GraphEditor {
 // Compatibility spelling for adopters of the earlier host API.
 using NoodlesGraphView = GraphEditor;
 
-}  // namespace noodles::apple
+}  // namespace noodles::demo

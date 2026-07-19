@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace noodles::apple {
+namespace noodles::demo {
 
 // Plain, persistence-agnostic data consumed by GraphEditor. A GraphDocument may
 // be backed by the reference in-memory model or an application's own storage.
@@ -131,4 +131,4 @@ class GraphDocument {
   virtual void removeObserver(ObserverToken token) = 0;
 };
 
-}  // namespace noodles::apple
+}  // namespace noodles::demo

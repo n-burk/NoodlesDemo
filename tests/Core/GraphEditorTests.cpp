@@ -7,8 +7,8 @@
 // NO GL calls here — setDocument + hit-model must be usable without a
 // context (initializeGL is never called).
 
-#include <noodles/apple/GraphEditor.h>
-#include <noodles/apple/InMemoryGraphDocument.h>
+#include <noodles/demo/GraphEditor.h>
+#include <noodles/demo/InMemoryGraphDocument.h>
 
 
 
@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-namespace ig = noodles::apple;
+namespace ig = noodles::demo;
 
 #define INK_CHECK(cond)                                                       \
   do {                                                                        \

@@ -1,4 +1,4 @@
-set(NOODLES_APPLE_ASSET_DIR "" CACHE PATH
+set(NOODLES_DEMO_ASSET_DIR "" CACHE PATH
     "Fallback Noodles asset root for the runnable Apple demos")
 
 if(TARGET noodles::noodles)
@@ -16,11 +16,11 @@ if(_noodles_target_asset_dir AND
   set(_noodles_example_asset_dir "${_noodles_target_asset_dir}")
 elseif(NOODLES_ASSET_DIR)
   set(_noodles_example_asset_dir "${NOODLES_ASSET_DIR}")
-elseif(NOODLES_APPLE_ASSET_DIR)
-  set(_noodles_example_asset_dir "${NOODLES_APPLE_ASSET_DIR}")
+elseif(NOODLES_DEMO_ASSET_DIR)
+  set(_noodles_example_asset_dir "${NOODLES_DEMO_ASSET_DIR}")
 else()
   message(FATAL_ERROR
-    "Noodles did not publish NOODLES_ASSET_DIR; set NOODLES_APPLE_ASSET_DIR")
+    "Noodles did not publish NOODLES_ASSET_DIR; set NOODLES_DEMO_ASSET_DIR")
 endif()
 
 if(NOT EXISTS "${_noodles_example_asset_dir}/shaders" OR
@@ -30,18 +30,18 @@ if(NOT EXISTS "${_noodles_example_asset_dir}/shaders" OR
     "${_noodles_example_asset_dir}")
 endif()
 
-add_library(NoodlesAppleExampleFixture STATIC
+add_library(NoodlesDemoExampleFixture STATIC
   DemoGraphFixture.cpp
   DemoImageProcessor.cpp)
-target_compile_features(NoodlesAppleExampleFixture PUBLIC cxx_std_17)
-target_include_directories(NoodlesAppleExampleFixture PUBLIC
+target_compile_features(NoodlesDemoExampleFixture PUBLIC cxx_std_17)
+target_include_directories(NoodlesDemoExampleFixture PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(NoodlesAppleExampleFixture PUBLIC NoodlesApple::Core)
+target_link_libraries(NoodlesDemoExampleFixture PUBLIC NoodlesDemo::Core)
 
 # Declare assets as bundle resources instead of copying into a guessed bundle
 # layout. CMake then chooses `Contents/Resources` on macOS and the bundle root
 # on iOS, and Xcode's resource phase sees the same files as Ninja/Make builds.
-function(noodles_apple_add_demo_resources target)
+function(noodles_demo_add_demo_resources target)
   file(GLOB _noodles_demo_shaders CONFIGURE_DEPENDS
        "${_noodles_example_asset_dir}/shaders/*.glsl")
   file(GLOB _noodles_demo_fonts CONFIGURE_DEPENDS
@@ -76,7 +76,7 @@ endfunction()
 # Source builds normally use static Noodles on iOS, but an installed package or
 # a macOS developer build may provide a shared target. Keep the runnable demos
 # self-contained in that case instead of relying on a build-tree rpath.
-function(noodles_apple_bundle_noodles_runtime target)
+function(noodles_demo_bundle_noodles_runtime target)
   get_target_property(_noodles_library_type
                       ${_noodles_example_target} TYPE)
   if(_noodles_library_type STREQUAL "SHARED_LIBRARY")
@@ -95,7 +95,7 @@ function(noodles_apple_bundle_noodles_runtime target)
   endif()
 endfunction()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesAppleUIKit)
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesDemoUIKit)
   set(_noodles_demo_asset_catalog
       "${CMAKE_CURRENT_SOURCE_DIR}/iPad/Assets.xcassets")
   set_source_files_properties("${_noodles_demo_asset_catalog}" PROPERTIES
@@ -109,7 +109,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesAppleUIKit)
   target_compile_options(NoodlesDemo PRIVATE
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   target_link_libraries(NoodlesDemo PRIVATE
-    NoodlesApple::UIKit NoodlesAppleExampleFixture
+    NoodlesDemo::UIKit NoodlesDemoExampleFixture
     "-framework Foundation" "-framework CoreGraphics"
     "-framework ImageIO" "-framework UniformTypeIdentifiers")
   set_target_properties(NoodlesDemo PROPERTIES
@@ -121,12 +121,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesAppleUIKit)
     XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
     XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.noodlesdemo.ipad"
     XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "2")
-  noodles_apple_add_demo_resources(NoodlesDemo)
-  noodles_apple_bundle_noodles_runtime(NoodlesDemo)
+  noodles_demo_add_demo_resources(NoodlesDemo)
+  noodles_demo_bundle_noodles_runtime(NoodlesDemo)
 endif()
 
 if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND
-   TARGET NoodlesAppleAppKit)
+   TARGET NoodlesDemoAppKit)
   set(_noodles_demo_macos_icon
       "${CMAKE_CURRENT_SOURCE_DIR}/macOS/NoodlesDemo.icns")
   set_source_files_properties("${_noodles_demo_macos_icon}" PROPERTIES
@@ -140,15 +140,15 @@ if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND
   target_compile_options(NoodlesDemo PRIVATE
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   target_link_libraries(NoodlesDemo PRIVATE
-    NoodlesApple::AppKit NoodlesAppleExampleFixture
+    NoodlesDemo::AppKit NoodlesDemoExampleFixture
     "-framework ImageIO" "-framework UniformTypeIdentifiers")
   set_target_properties(NoodlesDemo PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "NoodlesDemo"
     MACOSX_BUNDLE_GUI_IDENTIFIER "org.noodlesdemo.macos"
     MACOSX_BUNDLE_ICON_FILE "NoodlesDemo.icns"
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC "YES")
-  noodles_apple_add_demo_resources(NoodlesDemo)
-  noodles_apple_bundle_noodles_runtime(NoodlesDemo)
+  noodles_demo_add_demo_resources(NoodlesDemo)
+  noodles_demo_bundle_noodles_runtime(NoodlesDemo)
 endif()
 
 unset(_noodles_example_asset_dir)

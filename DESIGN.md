@@ -1,4 +1,4 @@
-# NoodlesApple design
+# NoodlesDemo design
 
 ## Purpose
 
@@ -10,12 +10,12 @@ an example consumer, not the owner of the platform implementation.
 
 ## Layering
 
-1. `NoodlesApple::Core` owns the plain graph DTOs, `GraphDocument` mutation and
+1. `NoodlesDemo::Core` owns the plain graph DTOs, `GraphDocument` mutation and
    observation contract, Noodles model/layout/render state, hit testing, and the
    complete interaction state machine.
-2. `NoodlesApple::UIKit` and `NoodlesApple::AppKit` own GL contexts, drawable
+2. `NoodlesDemo::UIKit` and `NoodlesDemo::AppKit` own GL contexts, drawable
    lifecycles, native-event translation, and on-demand frame scheduling.
-3. `NoodlesApple::USD` adapts an OpenUSD stage to `GraphDocument`. It is
+3. `NoodlesDemo::USD` adapts an OpenUSD stage to `GraphDocument`. It is
    optional and cannot leak PXR types into Core.
 4. Product adapters own undo integration, persisted document policy, cache and
    renderer invalidation, notifications, and routing a stylus miss into the

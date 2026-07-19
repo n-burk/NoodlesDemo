@@ -1,4 +1,4 @@
-#include <noodles/apple/UsdGraphDocument.h>
+#include <noodles/demo/UsdGraphDocument.h>
 
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/tf/token.h>
@@ -14,7 +14,7 @@
 #include <vector>
 
 PXR_NAMESPACE_USING_DIRECTIVE
-namespace na = noodles::apple;
+namespace na = noodles::demo;
 
 #define CHECK(condition)                                                       \
   do {                                                                         \

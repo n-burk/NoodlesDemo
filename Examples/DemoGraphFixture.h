@@ -2,12 +2,12 @@
 
 #include <memory>
 
-namespace noodles::apple {
+namespace noodles::demo {
 class GraphEditor;
 class InMemoryGraphDocument;
-} // namespace noodles::apple
+} // namespace noodles::demo
 
-namespace noodles::apple::examples {
+namespace noodles::demo::examples {
 
 // Shared by both demo applications so iPadOS and macOS exercise precisely the
 // same document, layout, values, links, colors and editor configuration.
@@ -18,4 +18,4 @@ struct DemoGraphFixture {
 
 DemoGraphFixture CreateDemoGraphFixture();
 
-} // namespace noodles::apple::examples
+} // namespace noodles::demo::examples

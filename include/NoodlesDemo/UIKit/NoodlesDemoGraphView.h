@@ -1,4 +1,4 @@
-// Copyright (c) 2026 NoodlesApple contributors.
+// Copyright (c) 2026 NoodlesDemo contributors.
 // SPDX-License-Identifier: MIT
 
 #import <UIKit/UIKit.h>
@@ -6,22 +6,22 @@
 #ifdef __cplusplus
 #include <memory>
 
-namespace noodles::apple {
+namespace noodles::demo {
 class GraphEditor;
 }
 #endif
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// A drawing view underneath NoodlesAppleGraphView can adopt this marker to
+/// A drawing view underneath NoodlesDemoGraphView can adopt this marker to
 /// receive Apple Pencil touches which miss graph content. The explicit cancel
 /// callback closes the forwarded stream if the graph overlay is removed while
 /// a Pencil is still down.
-@protocol NoodlesApplePencilForwardingTarget <NSObject>
-- (void)noodlesAppleCancelForwardedPencilGesture;
+@protocol NoodlesDemoPencilForwardingTarget <NSObject>
+- (void)noodlesDemoCancelForwardedPencilGesture;
 @end
 
-/// Public OpenGL ES 3/UIKit presentation shell for noodles::apple::GraphEditor.
+/// Public OpenGL ES 3/UIKit presentation shell for noodles::demo::GraphEditor.
 ///
 /// The view owns only the GL drawable and platform input lifecycle. The
 /// supplied editor and its GraphDocument own graph data and edits. Finger
@@ -30,20 +30,20 @@ NS_ASSUME_NONNULL_BEGIN
 /// route forwards the original touch unchanged for its whole lifetime.
 ///
 /// This header intentionally requires Objective-C++ at construction sites: the
-/// editor is shared with other public NoodlesApple adapters through
+/// editor is shared with other public NoodlesDemo adapters through
 /// std::shared_ptr.
-@interface NoodlesAppleGraphView : UIView <UIGestureRecognizerDelegate>
+@interface NoodlesDemoGraphView : UIView <UIGestureRecognizerDelegate>
 
 #ifdef __cplusplus
 - (instancetype)initWithFrame:(CGRect)frame
-                       editor:(std::shared_ptr<noodles::apple::GraphEditor>)editor
+                       editor:(std::shared_ptr<noodles::demo::GraphEditor>)editor
                    assetsPath:(NSString *)assetsPath NS_DESIGNATED_INITIALIZER;
 
-- (instancetype)initWithEditor:(std::shared_ptr<noodles::apple::GraphEditor>)editor
+- (instancetype)initWithEditor:(std::shared_ptr<noodles::demo::GraphEditor>)editor
                     assetsPath:(NSString *)assetsPath;
 
 /// The exact editor supplied at initialization.
-- (std::shared_ptr<noodles::apple::GraphEditor>)graphEditor;
+- (std::shared_ptr<noodles::demo::GraphEditor>)graphEditor;
 #endif
 
 - (instancetype)initWithFrame:(CGRect)frame NS_UNAVAILABLE;
@@ -57,12 +57,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// searches the current window for the first view adopting the forwarding
 /// protocol. If no target resolves, Pencil behaves like touch everywhere.
 @property(nonatomic, weak, nullable)
-    UIView<NoodlesApplePencilForwardingTarget> *pencilForwardingTarget;
+    UIView<NoodlesDemoPencilForwardingTarget> *pencilForwardingTarget;
 
 /// Override to provide an application-specific target lookup. The default first
 /// returns pencilForwardingTarget, then recursively searches the current
 /// window.
-- (nullable UIView<NoodlesApplePencilForwardingTarget> *)resolvePencilForwardingTarget;
+- (nullable UIView<NoodlesDemoPencilForwardingTarget> *)resolvePencilForwardingTarget;
 
 /// Cancel either active Pencil route: a stream forwarded to the drawing target
 /// or a graph-owned pointer stream. A graph value scrub receives its terminal
