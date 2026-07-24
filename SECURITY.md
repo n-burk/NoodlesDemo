@@ -1,6 +1,6 @@
 # Security policy
 
-NoodlesApple is a local UI/rendering library and does not implement networking,
+NoodlesDemo is a local UI/rendering library and does not implement networking,
 authentication, or persistence. Report memory-safety issues, malformed
 document crashes, unsafe resource loading, or dependency-supply-chain concerns
 through GitHub's **Security → Report a vulnerability** form for this repository

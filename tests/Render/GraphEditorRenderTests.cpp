@@ -1,5 +1,5 @@
 // GraphEditorRenderTests.cpp — a macOS offscreen GL pixel regression for the
-// public NoodlesApple Core renderer. The fixture uses InMemoryGraphDocument, so
+// public NoodlesDemo Core renderer. The fixture uses InMemoryGraphDocument, so
 // the test has no OpenUSD or product dependency.
 //
 // It creates a windowless desktop GL 3.2 core context via CGL, binds a private
@@ -14,8 +14,8 @@
 
 #include "DemoGraphFixture.h"
 
-#include <noodles/apple/GraphEditor.h>
-#include <noodles/apple/InMemoryGraphDocument.h>
+#include <noodles/demo/GraphEditor.h>
+#include <noodles/demo/InMemoryGraphDocument.h>
 
 #include <OpenGL/OpenGL.h>  // CGL
 #include <OpenGL/gl3.h>
@@ -28,10 +28,10 @@
 #include <utility>
 #include <vector>
 
-namespace ig = noodles::apple;
+namespace ig = noodles::demo;
 
-#ifndef NOODLES_APPLE_TEST_ASSET_DIR
-#  define NOODLES_APPLE_TEST_ASSET_DIR "."
+#ifndef NOODLES_DEMO_TEST_ASSET_DIR
+#  define NOODLES_DEMO_TEST_ASSET_DIR "."
 #endif
 
 namespace {
@@ -659,7 +659,7 @@ int main() {
     return 1;
   }
 
-  const std::string assets = NOODLES_APPLE_TEST_ASSET_DIR;
+  const std::string assets = NOODLES_DEMO_TEST_ASSET_DIR;
   const std::string fontPng = assets + "/fonts/Poppins-Regular.png";
   const std::string fontJson = assets + "/fonts/Poppins-Regular.json";
   std::printf("  assets: %s\n", assets.c_str());

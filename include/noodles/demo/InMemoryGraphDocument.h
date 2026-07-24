@@ -1,11 +1,11 @@
 #pragma once
 
-#include <noodles/apple/GraphDocument.h>
+#include <noodles/demo/GraphDocument.h>
 
 #include <memory>
 #include <vector>
 
-namespace noodles::apple {
+namespace noodles::demo {
 
 // Reference GraphDocument implementation used by the public demos and unit
 // tests. It follows the package visibility/authoring conventions: nodes appear
@@ -66,4 +66,4 @@ class InMemoryGraphDocument final : public GraphDocument {
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace noodles::apple
+}  // namespace noodles::demo

@@ -1,17 +1,17 @@
 #import <AppKit/AppKit.h>
 #import <ImageIO/ImageIO.h>
-#import <NoodlesApple/AppKit/NoodlesAppleGraphView.h>
+#import <NoodlesDemo/AppKit/NoodlesDemoGraphView.h>
 
 #include "../../Examples/AppleDemoImageLoader.h"
 
-#include <noodles/apple/GraphDocument.h>
-#include <noodles/apple/GraphEditor.h>
-#include <noodles/apple/InMemoryGraphDocument.h>
+#include <noodles/demo/GraphDocument.h>
+#include <noodles/demo/GraphEditor.h>
+#include <noodles/demo/InMemoryGraphDocument.h>
 
 #include <cstdio>
 #include <memory>
 
-namespace na = noodles::apple;
+namespace na = noodles::demo;
 
 #define CHECK(condition)                                                       \
   do {                                                                         \
@@ -55,7 +55,7 @@ int main() {
 
     std::string decodeError;
     const auto decoded =
-        noodles::apple::examples::DecodeDemoImageAtURL(imageURL, &decodeError);
+        noodles::demo::examples::DecodeDemoImageAtURL(imageURL, &decodeError);
     CHECK(decodeError.empty());
     CHECK(decoded.width == 2);
     CHECK(decoded.height == 2);
@@ -99,8 +99,8 @@ int main() {
     auto editor = std::make_shared<na::GraphEditor>();
     editor->setDocument(document);
 
-    NoodlesAppleGraphView *view =
-        [[NoodlesAppleGraphView alloc] initWithFrame:NSMakeRect(0, 0, 640, 480)
+    NoodlesDemoGraphView *view =
+        [[NoodlesDemoGraphView alloc] initWithFrame:NSMakeRect(0, 0, 640, 480)
                                               editor:editor
                                           assetsPath:@"/tmp/noodles-assets"];
     CHECK(view != nil);
@@ -148,6 +148,6 @@ int main() {
     CHECK(editor->nodeCount() == 1);
     CHECK([[view selectedNodeId] isEqualToString:@"/Smoke/Node"]);
   }
-  std::puts("NoodlesApple AppKit shell smoke ok");
+  std::puts("NoodlesDemo AppKit shell smoke ok");
   return 0;
 }

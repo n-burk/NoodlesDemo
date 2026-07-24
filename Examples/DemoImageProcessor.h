@@ -1,11 +1,11 @@
 #pragma once
 
-#include <noodles/apple/GraphDocument.h>
+#include <noodles/demo/GraphDocument.h>
 
 #include <cstdint>
 #include <vector>
 
-namespace noodles::apple::examples {
+namespace noodles::demo::examples {
 
 // Platform-neutral output used by both runnable demos. Pixels are tightly
 // packed, top-to-bottom straight-alpha RGBA8. RenderDemoImage itself returns
@@ -30,4 +30,4 @@ DemoRgbaImage RenderDemoImage(const GraphSnapshot& snapshot, int width = 768,
 // Stable checksum intended for example-contract tests and diagnostics.
 std::uint64_t DemoImageChecksum(const DemoRgbaImage& image);
 
-}  // namespace noodles::apple::examples
+}  // namespace noodles::demo::examples

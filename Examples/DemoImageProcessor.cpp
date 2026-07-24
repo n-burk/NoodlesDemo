@@ -8,7 +8,7 @@
 #include <limits>
 #include <string>
 
-namespace noodles::apple::examples {
+namespace noodles::demo::examples {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
@@ -502,4 +502,4 @@ std::uint64_t DemoImageChecksum(const DemoRgbaImage& image) {
   return hash;
 }
 
-}  // namespace noodles::apple::examples
+}  // namespace noodles::demo::examples

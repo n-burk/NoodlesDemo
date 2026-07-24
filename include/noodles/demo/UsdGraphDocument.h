@@ -1,6 +1,6 @@
 #pragma once
 
-#include <noodles/apple/GraphDocument.h>
+#include <noodles/demo/GraphDocument.h>
 
 // Some iOS OpenUSD distributions advertise Python support without shipping
 // Python headers. Temporarily select the non-Python C++ declarations without
@@ -8,20 +8,20 @@
 #ifdef PXR_PYTHON_SUPPORT_ENABLED
 #pragma push_macro("PXR_PYTHON_SUPPORT_ENABLED")
 #undef PXR_PYTHON_SUPPORT_ENABLED
-#define NOODLES_APPLE_RESTORE_PXR_PYTHON_SUPPORT_ENABLED 1
+#define NOODLES_DEMO_RESTORE_PXR_PYTHON_SUPPORT_ENABLED 1
 #endif
 #include <pxr/pxr.h>
 #include <pxr/usd/usd/stage.h>
-#ifdef NOODLES_APPLE_RESTORE_PXR_PYTHON_SUPPORT_ENABLED
+#ifdef NOODLES_DEMO_RESTORE_PXR_PYTHON_SUPPORT_ENABLED
 #pragma pop_macro("PXR_PYTHON_SUPPORT_ENABLED")
-#undef NOODLES_APPLE_RESTORE_PXR_PYTHON_SUPPORT_ENABLED
+#undef NOODLES_DEMO_RESTORE_PXR_PYTHON_SUPPORT_ENABLED
 #endif
 
 #include <functional>
 #include <memory>
 #include <vector>
 
-namespace noodles::apple {
+namespace noodles::demo {
 
 // Optional OpenUSD-backed document. The portable editor never sees pxr types;
 // applications that use USD link this adapter target and pass it to
@@ -97,4 +97,4 @@ class UsdGraphDocument final : public GraphDocument {
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace noodles::apple
+}  // namespace noodles::demo

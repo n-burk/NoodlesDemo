@@ -1,16 +1,16 @@
-# NoodlesApple agent guide
+# NoodlesDemo agent guide
 
-NoodlesApple is an independently buildable Apple host and editor-controller
+NoodlesDemo is an independently buildable Apple host and editor-controller
 for Meta's `noodles` C++ node-graph renderer. Keep the reusable package free of
 Inkwell application globals and UI notifications.
 
 ## Boundaries
 
-- `NoodlesAppleCore` depends only on `noodles::noodles` and the C++ standard
+- `NoodlesDemoCore` depends only on `noodles::noodles` and the C++ standard
   library. Its public document model must not include OpenUSD or Apple headers.
-- `NoodlesAppleUSD` is optional. OpenUSD collection and authoring live there,
+- `NoodlesDemoUSD` is optional. OpenUSD collection and authoring live there,
   never in the core.
-- `NoodlesAppleUIKit` and `NoodlesAppleAppKit` translate platform events and
+- `NoodlesDemoUIKit` and `NoodlesDemoAppKit` translate platform events and
   own GL contexts. They must drive the same `GraphEditor` implementation.
 - Product-specific cache invalidation, undo, notifications, and Pencil canvas
   forwarding policy remain in the consuming application adapter.

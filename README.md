@@ -1,6 +1,6 @@
-# NoodlesApple
+# NoodlesDemo
 
-NoodlesApple is a reusable C++17/Objective-C++ host for interactive
+NoodlesDemo is a reusable C++17/Objective-C++ host for interactive
 [`noodles`](https://github.com/facebookexperimental/noodles) node graphs on
 iPadOS and macOS. It supplies the application-facing pieces that the renderer
 deliberately does not own: an editable document seam, interaction controller,
@@ -16,10 +16,10 @@ folding, minimap, and gesture implementation.
 
 | CMake target | Purpose |
 | --- | --- |
-| `NoodlesApple::Core` | Graph DTO/document API plus the shared editor/controller |
-| `NoodlesApple::USD` | Optional source-embedded OpenUSD collector and mutation adapter |
-| `NoodlesApple::UIKit` | `CAEAGLLayer`/OpenGL ES 3 iPadOS view |
-| `NoodlesApple::AppKit` | `NSOpenGLView` macOS view |
+| `NoodlesDemo::Core` | Graph DTO/document API plus the shared editor/controller |
+| `NoodlesDemo::USD` | Optional source-embedded OpenUSD collector and mutation adapter |
+| `NoodlesDemo::UIKit` | `CAEAGLLayer`/OpenGL ES 3 iPadOS view |
+| `NoodlesDemo::AppKit` | `NSOpenGLView` macOS view |
 
 The UIKit and AppKit views render the same `GraphEditor`. Platform code only
 creates the GL context, translates native events, schedules frames, and can
@@ -87,8 +87,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 For local source development, pass
-`-DNOODLES_APPLE_NOODLES_SOURCE_DIR=/path/to/noodles`. Installed consumers use
-`find_package(NoodlesApple CONFIG REQUIRED)` and link the namespaced targets.
+`-DNOODLES_DEMO_NOODLES_SOURCE_DIR=/path/to/noodles`. Installed consumers use
+`find_package(NoodlesDemo CONFIG REQUIRED)` and link the namespaced targets.
 
 See [BUILDING.md](BUILDING.md) for iPadOS, install, and external-consumer
 commands. Maintainers should follow the coordinated dependency sequence in
@@ -96,7 +96,7 @@ commands. Maintainers should follow the coordinated dependency sequence in
 
 ## Distribution
 
-NoodlesApple is MIT licensed. Noodles is a separate MIT-licensed dependency;
+NoodlesDemo is MIT licensed. Noodles is a separate MIT-licensed dependency;
 its font and third-party notices ship with the Noodles package. A source
 distribution must include this repository's `LICENSE` and declare a compatible
 Noodles package dependency. No Inkwell product assets or private fixtures are

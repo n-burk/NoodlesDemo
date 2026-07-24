@@ -1,7 +1,7 @@
-#import <NoodlesApple/AppKit/NoodlesAppleGraphView.h>
+#import <NoodlesDemo/AppKit/NoodlesDemoGraphView.h>
 
 int main() {
   @autoreleasepool {
-    return [NoodlesAppleGraphView class] == Nil ? 1 : 0;
+    return [NoodlesDemoGraphView class] == Nil ? 1 : 0;
   }
 }

@@ -5,7 +5,7 @@
 #  define GLES_SILENCE_DEPRECATION 1
 #endif
 
-#include <noodles/apple/GraphEditor.h>
+#include <noodles/demo/GraphEditor.h>
 
 // Noodles layout, hit-testing, and rendering stay private behind GraphEditor.
 #include "core/GraphLayout.h"
@@ -37,7 +37,7 @@
 #include <utility>
 #include <vector>
 
-namespace noodles::apple {
+namespace noodles::demo {
 namespace {
 
 template <typename T, typename = void>
@@ -2912,4 +2912,4 @@ bool GraphEditor::addNodeAt(const std::string& nodeId, double viewX,
   return changed;
 }
 
-}  // namespace noodles::apple
+}  // namespace noodles::demo

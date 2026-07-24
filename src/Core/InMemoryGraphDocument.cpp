@@ -1,4 +1,4 @@
-#include <noodles/apple/InMemoryGraphDocument.h>
+#include <noodles/demo/InMemoryGraphDocument.h>
 
 #include <algorithm>
 #include <cmath>
@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace noodles::apple {
+namespace noodles::demo {
 namespace {
 
 std::string FormatScalar(double value, const std::string& type) {
@@ -530,4 +530,4 @@ void InMemoryGraphDocument::removeObserver(ObserverToken token) {
   impl_->observers.erase(token);
 }
 
-}  // namespace noodles::apple
+}  // namespace noodles::demo

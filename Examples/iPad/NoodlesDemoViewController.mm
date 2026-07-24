@@ -1,14 +1,14 @@
 #import "NoodlesDemoViewController.h"
 
-#import <NoodlesApple/UIKit/NoodlesAppleGraphView.h>
+#import <NoodlesDemo/UIKit/NoodlesDemoGraphView.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "../AppleDemoImageLoader.h"
 #include "../DemoGraphFixture.h"
 #include "../DemoImageProcessor.h"
 
-#include <noodles/apple/GraphEditor.h>
-#include <noodles/apple/InMemoryGraphDocument.h>
+#include <noodles/demo/GraphEditor.h>
+#include <noodles/demo/InMemoryGraphDocument.h>
 
 #include <memory>
 #include <utility>
@@ -70,7 +70,7 @@ static UILabel *ControlLabel(NSString *text) {
   return label;
 }
 
-static UIImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &image) {
+static UIImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
   if (image.empty()) return nil;
   const size_t rowBytes = static_cast<size_t>(image.width) * 4;
   NSData *data = [NSData dataWithBytes:image.pixels.data() length:image.pixels.size()];
@@ -96,16 +96,16 @@ static UIImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &ima
 
 @implementation NoodlesDemoViewController {
   NSString *_assetsPath;
-  noodles::apple::examples::DemoGraphFixture _fixture;
+  noodles::demo::examples::DemoGraphFixture _fixture;
   DemoOutputCanvas *_canvas;
-  NoodlesAppleGraphView *_graphView;
+  NoodlesDemoGraphView *_graphView;
   UILabel *_statusLabel;
   UILabel *_selectionLabel;
   UILabel *_opacityLabel;
   UILabel *_frameLabel;
   double _displayFrame;
   BOOL _didFrameGraph;
-  noodles::apple::examples::DemoRgbaImage _sourceImage;
+  noodles::demo::examples::DemoRgbaImage _sourceImage;
   NSUInteger _sourceLoadGeneration;
 }
 
@@ -122,8 +122,8 @@ static UIImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &ima
   _canvas = canvas;
   _displayFrame = 12.0;
 
-  _fixture = noodles::apple::examples::CreateDemoGraphFixture();
-  _graphView = [[NoodlesAppleGraphView alloc] initWithFrame:canvas.bounds
+  _fixture = noodles::demo::examples::CreateDemoGraphFixture();
+  _graphView = [[NoodlesDemoGraphView alloc] initWithFrame:canvas.bounds
                                                      editor:_fixture.editor
                                                  assetsPath:_assetsPath];
   _graphView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -250,13 +250,13 @@ static UIImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &ima
 
 - (void)refreshOutputImageLive:(BOOL)live {
   if (!_fixture.document || !_canvas) return;
-  const noodles::apple::GraphSnapshot snapshot = _fixture.document->snapshot(_displayFrame);
-  const noodles::apple::examples::DemoRgbaImage *source =
+  const noodles::demo::GraphSnapshot snapshot = _fixture.document->snapshot(_displayFrame);
+  const noodles::demo::examples::DemoRgbaImage *source =
       _sourceImage.empty() ? nullptr : &_sourceImage;
   const int width = live ? 320 : 640;
   const int height = live ? 200 : 400;
-  const noodles::apple::examples::DemoRgbaImage output =
-      noodles::apple::examples::RenderDemoImage(snapshot, width, height, source);
+  const noodles::demo::examples::DemoRgbaImage output =
+      noodles::demo::examples::RenderDemoImage(snapshot, width, height, source);
   [_canvas setOutputImage:ImageFromRgba(output)];
 }
 
@@ -282,7 +282,7 @@ static UIImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &ima
   __weak NoodlesDemoViewController *weakSelf = self;
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
     const BOOL accessed = [url startAccessingSecurityScopedResource];
-    auto decoded = std::make_shared<noodles::apple::examples::DemoRgbaImage>();
+    auto decoded = std::make_shared<noodles::demo::examples::DemoRgbaImage>();
     auto decodeError = std::make_shared<std::string>();
     __block NSError *coordinationError = nil;
     NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
@@ -290,7 +290,7 @@ static UIImage *ImageFromRgba(const noodles::apple::examples::DemoRgbaImage &ima
                                     options:NSFileCoordinatorReadingWithoutChanges
                                       error:&coordinationError
                                  byAccessor:^(NSURL *coordinatedURL) {
-                                   *decoded = noodles::apple::examples::DecodeDemoImageAtURL(
+                                   *decoded = noodles::demo::examples::DecodeDemoImageAtURL(
                                        coordinatedURL, decodeError.get());
                                  }];
     if (accessed) [url stopAccessingSecurityScopedResource];

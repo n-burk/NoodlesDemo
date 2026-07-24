@@ -1,9 +1,9 @@
 #include "DemoGraphFixture.h"
 #include "DemoImageProcessor.h"
 
-#include <noodles/apple/GraphDocument.h>
-#include <noodles/apple/GraphEditor.h>
-#include <noodles/apple/InMemoryGraphDocument.h>
+#include <noodles/demo/GraphDocument.h>
+#include <noodles/demo/GraphEditor.h>
+#include <noodles/demo/InMemoryGraphDocument.h>
 
 #include <cmath>
 #include <cstdint>
@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace na = noodles::apple;
+namespace na = noodles::demo;
 
 #define CHECK(condition)                                                       \
   do {                                                                         \

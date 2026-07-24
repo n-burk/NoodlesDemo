@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <limits>
 
-namespace noodles::apple::examples {
+namespace noodles::demo::examples {
 namespace {
 
 void SetError(std::string *destination, const char *message) {
@@ -105,4 +105,4 @@ DemoRgbaImage DecodeDemoImageAtURL(NSURL *url, std::string *errorMessage) {
   return result;
 }
 
-}  // namespace noodles::apple::examples
+}  // namespace noodles::demo::examples
