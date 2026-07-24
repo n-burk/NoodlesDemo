@@ -58,6 +58,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setOverlayOpacity:(float)opacity;
 - (void)setClearColorRed:(float)red green:(float)green blue:(float)blue alpha:(float)alpha;
 - (void)setValueScrubEnabled:(BOOL)enabled;
+/// Distance-based fading of noodles far from the viewport center (on by
+/// default); see GraphEditor::setLinkFadingEnabled.
+- (void)setLinkFadingEnabled:(BOOL)enabled;
 - (void)setDisplayFrame:(double)frame;
 - (NSString *)selectedNodeId;
 - (BOOL)addNode:(NSString *)nodeId atPoint:(NSPoint)point;
@@ -84,6 +87,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, nullable) void (^onGraphStructureChanged)(void);
 @property(nonatomic, copy, nullable) void (^onAttributeEdited)
     (NSString *nodeId, NSString *attributeName, BOOL live);
+/// An editor-authored topology edit left the graph in an invalid configuration
+/// (for example a feedback loop). The edit is still applied; hosts typically
+/// present the message as a transient error toast.
+@property(nonatomic, copy, nullable) void (^onConfigurationError)(NSString *message);
 
 @end
 #pragma clang diagnostic pop

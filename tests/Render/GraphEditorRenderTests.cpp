@@ -115,6 +115,34 @@ std::shared_ptr<ig::InMemoryGraphDocument> MakeRelLeftDocument() {
   return document;
 }
 
+ig::GraphProperty ImagePort(std::string name,
+                            ig::GraphPropertyDirection direction) {
+  ig::GraphProperty property;
+  property.name = std::move(name);
+  property.kind = ig::GraphPropertyKind::Attribute;
+  property.type = "image";
+  property.direction = direction;
+  return property;
+}
+
+// A long, flat data wire: A.out → B.in with identical row layouts so both
+// endpoints share one Y. The gap is wide enough that, with the viewport
+// centered on the wire's midpoint, both endpoints sit beyond the link-fade
+// band start and the crossing noodle dims to near-background.
+std::shared_ptr<ig::InMemoryGraphDocument> MakeFadeDocument() {
+  auto document = std::make_shared<ig::InMemoryGraphDocument>();
+  document->addNode(Node("/Fade/A", 0.0, 200.0));
+  document->addNode(Node("/Fade/B", 1600.0, 200.0));
+  document->addProperty("/Fade/A", Numeric("gain", 0.5));
+  document->addProperty("/Fade/A",
+                        ImagePort("out", ig::GraphPropertyDirection::Output));
+  document->addProperty("/Fade/B", Numeric("gain", 0.5));
+  document->addProperty("/Fade/B",
+                        ImagePort("in", ig::GraphPropertyDirection::Input));
+  document->authorConnection("/Fade/B", "in", "/Fade/A", "out");
+  return document;
+}
+
 struct Rgba {
   uint8_t r, g, b, a;
 };
@@ -642,6 +670,88 @@ bool runDemoRealFontLayoutCase(const std::string& assets,
   return ok;
 }
 
+// Link fading gate: with the editor-default reference band, a noodle whose
+// endpoints both sit beyond the fade start dims to near-background; turning
+// fading off restores the solid wire in the same frame setup.
+bool runLinkFadeCase(GLuint defaultFbo, const std::string& assets,
+                     const std::string& fontPng, const std::string& fontJson) {
+  std::printf("\n=== LINK FADE CASE: distant noodles dim ===\n");
+  const uint8_t cr = 10, cg = 12, cb = 16;
+  ig::NoodlesGraphView view;
+  view.setDocument(MakeFadeDocument());
+  glBindFramebuffer(GL_FRAMEBUFFER, defaultFbo);
+  view.initializeGL(assets, fontPng, fontJson);
+  drainGlErrors("fade initializeGL");
+  view.resize(kW, kH, 1.0f);
+  view.setZoom(1.0);
+  view.setClearColor(cr / 255.0f, cg / 255.0f, cb / 255.0f, 1.0f);
+  view.setOverlayOpacity(1.0f);
+
+  double outX = 0.0, outY = 0.0, inX = 0.0, inY = 0.0;
+  bool foundOut = false, foundIn = false;
+  for (const ig::GraphPinInfo& pin : view.nodePins("/Fade/A")) {
+    if (pin.isOutput && pin.name == "out") {
+      outX = pin.centerX;
+      outY = pin.centerY;
+      foundOut = true;
+    }
+  }
+  for (const ig::GraphPinInfo& pin : view.nodePins("/Fade/B")) {
+    if (!pin.isOutput && pin.name == "in") {
+      inX = pin.centerX;
+      inY = pin.centerY;
+      foundIn = true;
+    }
+  }
+  if (!foundOut || !foundIn) {
+    std::printf("  [FAIL] fade fixture pins missing\n");
+    view.cleanupGL();
+    return false;
+  }
+  // Center the viewport on the wire's midpoint: endpoint distance ≈
+  // 1.3 × the viewport dimension, past the reference fade start of 0.7.
+  const double midX = (outX + inX) * 0.5;
+  const double midY = (outY + inY) * 0.5;
+  view.setViewportPan(midX - kW * 0.5, midY - kH * 0.5);
+
+  auto readback = [&](std::vector<Rgba>& out) {
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFbo);
+    glViewport(0, 0, kW, kH);
+    view.renderFrame();
+    out.assign(static_cast<size_t>(kW) * kH, Rgba{});
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFbo);
+    glReadPixels(0, 0, kW, kH, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+  };
+
+  // The wire crosses the center row. Tolerance 12 counts a ~93%-faded wire as
+  // background while the solid default gray (≈115) never passes for clear.
+  auto countWirePixels = [&](const std::vector<Rgba>& px) {
+    const int centerRow = kH / 2;
+    int nonBg = 0;
+    for (int row = centerRow - 6; row <= centerRow + 6; ++row) {
+      for (int col = kW / 2 - 100; col <= kW / 2 + 100; ++col) {
+        const Rgba& p = px[static_cast<size_t>(row) * kW + col];
+        const auto near = [](int x, int y) { return std::abs(x - y) <= 12; };
+        if (!(near(p.r, cr) && near(p.g, cg) && near(p.b, cb))) ++nonBg;
+      }
+    }
+    return nonBg;
+  };
+
+  std::vector<Rgba> faded, solid;
+  readback(faded);  // fading is enabled by default
+  view.setLinkFadingEnabled(false);
+  readback(solid);
+  const int fadedCount = countWirePixels(faded);
+  const int solidCount = countWirePixels(solid);
+  std::printf("  wire band pixels: fading on=%d off=%d\n", fadedCount,
+              solidCount);
+  const bool ok = solidCount > 60 && fadedCount * 3 < solidCount;
+  std::printf("  >>> LINK FADE CASE %s\n", ok ? "PASSED" : "FAILED");
+  view.cleanupGL();
+  return ok;
+}
+
 }  // namespace
 
 int main() {
@@ -709,6 +819,11 @@ int main() {
   const bool demoLayoutOk =
       runDemoRealFontLayoutCase(assets, fontPng, fontJson, defaultFbo);
   ok &= demoLayoutOk;
+
+  // Distance-based link fading gate: distant noodles dim, and the host
+  // toggle restores them.
+  const bool linkFadeOk = runLinkFadeCase(defaultFbo, assets, fontPng, fontJson);
+  ok &= linkFadeOk;
 
   view.cleanupGL();
   CGLSetCurrentContext(nullptr);

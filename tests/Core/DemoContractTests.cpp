@@ -738,6 +738,270 @@ bool TestDirectDisplayIgnoresDisconnectedDownstreamControls() {
   return true;
 }
 
+bool TestDemoGraphVariantsAreDistinctAndValid() {
+  CHECK(na::examples::kDemoGraphVariantCount == 4);
+
+  // Titles drive the apps' switcher control: non-empty and unique.
+  std::vector<std::string> titles;
+  for (int index = 0; index < na::examples::kDemoGraphVariantCount; ++index) {
+    const char* title = na::examples::DemoGraphVariantTitle(
+        static_cast<na::examples::DemoGraphVariant>(index));
+    CHECK(title);
+    CHECK(title[0] != '\0');
+    for (const std::string& existing : titles) CHECK(existing != title);
+    titles.push_back(title);
+  }
+
+  // The no-argument fixture remains exactly the GrainComp variant.
+  auto classic = na::examples::CreateDemoGraphFixture();
+  auto grainComp = na::examples::CreateDemoGraphFixture(
+      na::examples::DemoGraphVariant::GrainComp);
+  CHECK(classic.editor->nodeCount() == grainComp.editor->nodeCount());
+  CHECK(classic.editor->linkCount() == grainComp.editor->linkCount());
+  CHECK(RenderHash(classic.document->snapshot(12.0)) ==
+        RenderHash(grainComp.document->snapshot(12.0)));
+
+  std::vector<std::uint64_t> hashes;
+  for (int index = 0; index < na::examples::kDemoGraphVariantCount; ++index) {
+    const auto variant = static_cast<na::examples::DemoGraphVariant>(index);
+    auto fixture = na::examples::CreateDemoGraphFixture(variant);
+    CHECK(fixture.document);
+    CHECK(fixture.editor);
+    CHECK(fixture.editor->nodeCount() >= 6);
+    CHECK(fixture.editor->linkCount() >= 5);
+    CHECK(fixture.editor->configurationIssues().empty());
+
+    // Every variant renders deterministically through the shared processor.
+    const na::GraphSnapshot snapshot = fixture.document->snapshot(12.0);
+    const na::examples::DemoRgbaImage first =
+        na::examples::RenderDemoImage(snapshot, 128, 80);
+    const na::examples::DemoRgbaImage second =
+        na::examples::RenderDemoImage(snapshot, 128, 80);
+    CHECK(!first.empty());
+    CHECK(first.pixels == second.pixels);
+
+    // Variants are visually distinct examples, not relabeled copies.
+    const std::uint64_t hash = na::examples::DemoImageChecksum(first);
+    for (const std::uint64_t existing : hashes) CHECK(existing != hash);
+    hashes.push_back(hash);
+
+    // The source-image picker contract holds in every variant.
+    CHECK(FindProperty(snapshot, "/Demo/SourceImage", "path"));
+
+    // Every variant authors an animation, so the frame slider always shows
+    // real intermediate imagery.
+    CHECK(RenderHash(fixture.document->snapshot(0.0)) !=
+          RenderHash(fixture.document->snapshot(24.0)));
+  }
+  return true;
+}
+
+bool TestStressTestVariantScale() {
+  auto fixture = na::examples::CreateDemoGraphFixture(
+      na::examples::DemoGraphVariant::StressTest);
+  CHECK(fixture.editor->nodeCount() >= 100);
+  CHECK(fixture.editor->linkCount() >= 100);
+  CHECK(fixture.editor->configurationIssues().empty());
+
+  const na::GraphSnapshot snapshot = fixture.document->snapshot(12.0);
+  CHECK(snapshot.nodes.size() == fixture.editor->nodeCount());
+
+  // The stress graph stores no positions: every node is connected, so the
+  // editor's layered auto-layout places the whole wall — with measured node
+  // sizes, so no two nodes may overlap.
+  for (const na::GraphNode& node : snapshot.nodes) {
+    CHECK(!node.hasPosition);
+  }
+  struct PlacedBox {
+    double x, y, w, h;
+  };
+  std::vector<PlacedBox> boxes;
+  boxes.reserve(snapshot.nodes.size());
+  for (const na::GraphNode& node : snapshot.nodes) {
+    PlacedBox box{};
+    CHECK(fixture.editor->nodePosition(node.id, &box.x, &box.y));
+    CHECK(fixture.editor->nodeSize(node.id, &box.w, &box.h));
+    CHECK(box.w > 0.0);
+    CHECK(box.h > 0.0);
+    boxes.push_back(box);
+  }
+  for (std::size_t a = 0; a < boxes.size(); ++a) {
+    for (std::size_t b = a + 1; b < boxes.size(); ++b) {
+      const bool overlaps = boxes[a].x < boxes[b].x + boxes[b].w &&
+                            boxes[b].x < boxes[a].x + boxes[a].w &&
+                            boxes[a].y < boxes[b].y + boxes[b].h &&
+                            boxes[b].y < boxes[a].y + boxes[a].h;
+      CHECK(!overlaps);
+    }
+  }
+
+  // The classic render chain stays intact so Display still shows an image,
+  // and its foreground is the merged output of every stress chain.
+  CHECK(HasEdge(snapshot, "/Demo/Display", "surface", "/Demo/Composite",
+                "output"));
+  CHECK(HasEdge(snapshot, "/Demo/Composite", "foreground",
+                "/Stress/MergeFinal", "output"));
+
+  // Ops deep in the chains author normally at the display frame.
+  const std::uint64_t baselineHash = RenderHash(snapshot);
+  CHECK(fixture.document->setAttributeValue("/Stress/Chain3/Op5", "gain", 1.9,
+                                            12.0));
+  const na::GraphSnapshot edited = fixture.document->snapshot(12.0);
+  const na::GraphProperty* gain =
+      FindProperty(edited, "/Stress/Chain3/Op5", "gain");
+  CHECK(gain);
+  // Float-typed attributes round-trip through single precision.
+  CHECK(std::abs(gain->numericValue - 1.9) < 1e-5);
+
+  // The stress graph is not decorative: every chain feeds Display through
+  // the merge tree, so scrubbing a mid-chain op changes the rendered image,
+  // as does a generator head parameter on an even (self-sourced) chain.
+  CHECK(RenderHash(edited) != baselineHash);
+  auto headFixture = na::examples::CreateDemoGraphFixture(
+      na::examples::DemoGraphVariant::StressTest);
+  CHECK(headFixture.document->setAttributeValue("/Stress/Chain2/Op0",
+                                                "frequency", 9.0, 12.0));
+  CHECK(RenderHash(headFixture.document->snapshot(12.0)) != baselineHash);
+
+  // Animated stress ops evaluate per frame like the demo nodes do.
+  const na::GraphSnapshot startSnapshot = fixture.document->snapshot(0.0);
+  const na::GraphSnapshot endSnapshot = fixture.document->snapshot(24.0);
+  const na::GraphProperty* animatedStart =
+      FindProperty(startSnapshot, "/Stress/Chain1/Op5", "gain");
+  const na::GraphProperty* animatedEnd =
+      FindProperty(endSnapshot, "/Stress/Chain1/Op5", "gain");
+  CHECK(animatedStart && animatedEnd);
+  CHECK(animatedStart->numericValue < animatedEnd->numericValue);
+  return true;
+}
+
+bool TestAddableOpNodesExec() {
+  // Every kind in the Add Node palette is a real operation: unwired it leaves
+  // the image alone; wired between Composite and Display it changes it.
+  CHECK(na::examples::kDemoOpKindCount == 16);
+  for (int kindIndex = 0; kindIndex < na::examples::kDemoOpKindCount;
+       ++kindIndex) {
+    const auto kind = static_cast<na::examples::DemoOpKind>(kindIndex);
+    const char* title = na::examples::DemoOpKindTitle(kind);
+    CHECK(title);
+    CHECK(title[0] != '\0');
+
+    auto fixture = na::examples::CreateDemoGraphFixture();
+    const std::uint64_t baseline =
+        RenderHash(fixture.document->snapshot(12.0));
+    CHECK(fixture.editor->createNodeAutoPlaced(
+        na::examples::MakeDemoOpNode(kind, "/Demo/TestOp", "Test Op")));
+    CHECK(RenderHash(fixture.document->snapshot(12.0)) == baseline);
+
+    if (kind != na::examples::DemoOpKind::Noise) {
+      CHECK(fixture.document->authorConnection("/Demo/TestOp", "input",
+                                               "/Demo/Composite", "output"));
+    }
+    if (kind == na::examples::DemoOpKind::Mix) {
+      CHECK(fixture.document->authorConnection("/Demo/TestOp", "blend",
+                                               "/Demo/Noise", "output"));
+    }
+    CHECK(fixture.document->authorConnection("/Demo/Display", "surface",
+                                             "/Demo/TestOp", "output"));
+    CHECK(RenderHash(fixture.document->snapshot(12.0)) != baseline);
+  }
+  return true;
+}
+
+bool TestCreateNodeAutoPlacedUsesAutoLayout() {
+  auto fixture = na::examples::CreateDemoGraphFixture();
+  const std::size_t before = fixture.editor->nodeCount();
+  CHECK(fixture.editor->createNodeAutoPlaced(na::examples::MakeDemoOpNode(
+      na::examples::DemoOpKind::Grade, "/Demo/Grade1", "Grade 1")));
+  CHECK(fixture.editor->createNodeAutoPlaced(na::examples::MakeDemoOpNode(
+      na::examples::DemoOpKind::Invert, "/Demo/Invert1", "Invert 1")));
+  CHECK(fixture.editor->nodeCount() == before + 2);
+
+  // Auto-placed nodes never stack on one point, unlike a fixed-center drop.
+  double firstX = 0.0, firstY = 0.0, secondX = 0.0, secondY = 0.0;
+  CHECK(fixture.editor->nodePosition("/Demo/Grade1", &firstX, &firstY));
+  CHECK(fixture.editor->nodePosition("/Demo/Invert1", &secondX, &secondY));
+  CHECK(firstX != secondX || firstY != secondY);
+
+  // The resolved position is authored, keeping the unwired node visible.
+  const na::GraphSnapshot snapshot = fixture.document->snapshot(12.0);
+  const na::GraphNode* added = FindNode(snapshot, "/Demo/Grade1");
+  CHECK(added);
+  CHECK(added->hasPosition);
+  return true;
+}
+
+bool TestLinkFadingConfiguration() {
+  // Link fading ships enabled: the demos tighten the reference band so
+  // peripheral noodles fade while panning dense graphs. The toggle is a
+  // host-facing switch, and malformed ranges are clamped/reordered safely.
+  auto fixture = na::examples::CreateDemoGraphFixture();
+  CHECK(fixture.editor->linkFadingEnabled());
+  fixture.editor->setLinkFadingEnabled(false);
+  CHECK(!fixture.editor->linkFadingEnabled());
+  fixture.editor->setLinkFadingEnabled(true);
+  CHECK(fixture.editor->linkFadingEnabled());
+  fixture.editor->setLinkFadeRange(0.3, 0.6);   // reversed band is reordered
+  fixture.editor->setLinkFadeRange(-1.0, 99.0); // clamped, must not throw
+  CHECK(fixture.editor->linkFadingEnabled());
+  return true;
+}
+
+bool TestGraphSwitchingOnLiveEditor() {
+  // Both apps switch graphs by swapping documents on the one live editor and
+  // cache each document so a variant's edits survive switching away and back.
+  auto fixture = na::examples::CreateDemoGraphFixture();
+  const std::size_t compositeNodes = fixture.editor->nodeCount();
+  const std::size_t compositeLinks = fixture.editor->linkCount();
+  double freshX = 0.0;
+  double freshY = 0.0;
+  CHECK(fixture.editor->nodePosition("/Demo/Display", &freshX, &freshY));
+
+  CHECK(fixture.document->setAttributeValue("/Demo/Mask", "radius", 0.31,
+                                            12.0));
+
+  auto stress = na::examples::CreateDemoGraphDocument(
+      na::examples::DemoGraphVariant::StressTest);
+  fixture.editor->setDocument(stress);
+  CHECK(fixture.editor->nodeCount() >= 100);
+  CHECK(fixture.editor->linkCount() >= 100);
+  CHECK(fixture.editor->configurationIssues().empty());
+  CHECK(fixture.editor->nodePins("/Stress/Chain0/Op5").size() > 0);
+
+  // The stress graph auto-lays-out too; its far deeper topology puts the
+  // shared /Demo/Display id somewhere the composite layout never would.
+  double stressX = 0.0;
+  double stressY = 0.0;
+  CHECK(fixture.editor->nodePosition("/Demo/Display", &stressX, &stressY));
+  CHECK(stressX != freshX || stressY != freshY);
+
+  fixture.editor->setDocument(fixture.document);
+  CHECK(fixture.editor->nodeCount() == compositeNodes);
+  CHECK(fixture.editor->linkCount() == compositeLinks);
+
+  // Held layout state must not leak between documents that reuse node ids: a
+  // fresh, unpositioned Composite document opened after the stress grid must
+  // re-run its own deterministic layout, not inherit the stress placement.
+  auto compositeAgain = na::examples::CreateDemoGraphDocument(
+      na::examples::DemoGraphVariant::GrainComp);
+  fixture.editor->setDocument(compositeAgain);
+  double againX = 0.0;
+  double againY = 0.0;
+  CHECK(fixture.editor->nodePosition("/Demo/Display", &againX, &againY));
+  CHECK(std::abs(againX - freshX) < 1e-9);
+  CHECK(std::abs(againY - freshY) < 1e-9);
+
+  fixture.editor->setDocument(fixture.document);
+
+  // The pre-switch edit is still in the cached document.
+  const na::GraphSnapshot restored = fixture.document->snapshot(12.0);
+  const na::GraphProperty* radius =
+      FindProperty(restored, "/Demo/Mask", "radius");
+  CHECK(radius);
+  CHECK(std::abs(radius->numericValue - 0.31) < 1e-5);
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -763,6 +1027,14 @@ int main() {
        TestMissingInputAndCycleAreDeterministic},
       {"direct_display_ignores_downstream_controls",
        TestDirectDisplayIgnoresDisconnectedDownstreamControls},
+      {"demo_graph_variants_are_distinct_and_valid",
+       TestDemoGraphVariantsAreDistinctAndValid},
+      {"stress_test_variant_scale", TestStressTestVariantScale},
+      {"addable_op_nodes_exec", TestAddableOpNodesExec},
+      {"create_node_auto_placed_uses_auto_layout",
+       TestCreateNodeAutoPlacedUsesAutoLayout},
+      {"link_fading_configuration", TestLinkFadingConfiguration},
+      {"graph_switching_on_live_editor", TestGraphSwitchingOnLiveEditor},
   };
 
   bool passed = true;

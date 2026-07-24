@@ -35,6 +35,7 @@ class InMemoryGraphDocument final : public GraphDocument {
 
   GraphSnapshot snapshot(double displayFrame) const override;
   bool containsNode(const std::string& nodeId) const override;
+  bool createNode(GraphNode node) override;
   bool authorRelationship(const std::string& sourceNodeId,
                           const std::string& relationshipName,
                           const std::string& targetNodeId) override;

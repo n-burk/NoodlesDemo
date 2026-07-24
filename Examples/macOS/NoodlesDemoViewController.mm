@@ -10,7 +10,9 @@
 #include <noodles/demo/GraphEditor.h>
 #include <noodles/demo/InMemoryGraphDocument.h>
 
+#include <array>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace {
@@ -68,20 +70,28 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
 - (void)refreshOutputImageLive:(BOOL)live;
 - (void)presentSourceImagePicker;
 - (void)loadSourceImageAtURL:(NSURL *)url;
+- (void)showErrorToast:(NSString *)message;
 @end
 
 @implementation NoodlesDemoViewController {
   NSString *_assetsPath;
   noodles::demo::examples::DemoGraphFixture _fixture;
+  std::array<std::shared_ptr<noodles::demo::InMemoryGraphDocument>,
+             noodles::demo::examples::kDemoGraphVariantCount>
+      _documents;
+  NSInteger _activeVariant;
   NSImageView *_outputView;
   NoodlesDemoGraphView *_graphView;
   NSTextField *_statusLabel;
   NSTextField *_selectionLabel;
   NSTextField *_opacityLabel;
   NSTextField *_frameLabel;
+  NSTextField *_toastLabel;
+  NSUInteger _toastGeneration;
   double _displayFrame;
   BOOL _didFrameGraph;
   noodles::demo::examples::DemoRgbaImage _sourceImage;
+  NSString *_sourceImagePath;
   NSUInteger _sourceLoadGeneration;
 }
 
@@ -99,6 +109,8 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
   self.view = container;
 
   _fixture = noodles::demo::examples::CreateDemoGraphFixture();
+  _documents[0] = _fixture.document;
+  _activeVariant = 0;
   _displayFrame = 12.0;
   _outputView = [[NSImageView alloc] initWithFrame:container.bounds];
   _outputView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -146,13 +158,39 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
   fitGraph.bezelStyle = NSBezelStyleRounded;
   fitGraph.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold];
 
-  NSStackView *controlRow = [NSStackView
-      stackViewWithViews:@[ _opacityLabel, opacitySlider, _frameLabel, frameSlider, fitGraph ]];
+  NSButton *addNode = [NSButton buttonWithTitle:@"+ Node"
+                                         target:self
+                                         action:@selector(addDemoNode:)];
+  addNode.bezelStyle = NSBezelStyleRounded;
+  addNode.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold];
+
+  NSMutableArray<NSString *> *graphTitles = [NSMutableArray array];
+  for (int variant = 0; variant < noodles::demo::examples::kDemoGraphVariantCount; ++variant) {
+    [graphTitles addObject:@(noodles::demo::examples::DemoGraphVariantTitle(
+                     static_cast<noodles::demo::examples::DemoGraphVariant>(variant)))];
+  }
+  NSSegmentedControl *graphPicker =
+      [NSSegmentedControl segmentedControlWithLabels:graphTitles
+                                        trackingMode:NSSegmentSwitchTrackingSelectOne
+                                              target:self
+                                              action:@selector(graphChanged:)];
+  graphPicker.selectedSegment = 0;
+  graphPicker.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium];
+
+  NSStackView *controlRow = [NSStackView stackViewWithViews:@[
+    graphPicker, _opacityLabel, opacitySlider, _frameLabel, frameSlider, fitGraph, addNode
+  ]];
   controlRow.translatesAutoresizingMaskIntoConstraints = NO;
   controlRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
   controlRow.alignment = NSLayoutAttributeCenterY;
   controlRow.spacing = 10.0;
   [controls addSubview:controlRow];
+
+  _toastLabel = HudLabel(@"");
+  _toastLabel.layer.backgroundColor =
+      [NSColor colorWithSRGBRed:0.55 green:0.10 blue:0.12 alpha:0.92].CGColor;
+  _toastLabel.hidden = YES;
+  [container addSubview:_toastLabel];
 
   [NSLayoutConstraint activateConstraints:@[
     [_statusLabel.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-12.0],
@@ -181,6 +219,15 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
     [frameSlider.widthAnchor constraintEqualToConstant:150.0],
     [fitGraph.widthAnchor constraintEqualToConstant:54.0],
     [fitGraph.heightAnchor constraintEqualToConstant:28.0],
+    [addNode.widthAnchor constraintEqualToConstant:72.0],
+    [addNode.heightAnchor constraintEqualToConstant:28.0],
+    [_toastLabel.topAnchor constraintEqualToAnchor:controls.bottomAnchor constant:10.0],
+    [_toastLabel.centerXAnchor constraintEqualToAnchor:container.centerXAnchor],
+    [_toastLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:container.leadingAnchor
+                                                            constant:12.0],
+    [_toastLabel.trailingAnchor constraintLessThanOrEqualToAnchor:container.trailingAnchor
+                                                         constant:-12.0],
+    [_toastLabel.heightAnchor constraintEqualToConstant:30.0],
   ]];
 
   __weak NoodlesDemoViewController *weakSelf = self;
@@ -214,9 +261,113 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
   };
   _graphView.onGraphStructureChanged = ^{
     NoodlesDemoViewController *controller = weakSelf;
-    if (controller) [controller refreshOutputImage];
+    if (!controller) return;
+    // An external document topology change must restructure the editor's
+    // graph, not just the rendered output (the shell schedules the refresh on
+    // its serialized render thread through reloadGraph).
+    [controller->_graphView reloadGraph];
+    [controller refreshOutputImage];
+  };
+  _graphView.onConfigurationError = ^(NSString *message) {
+    NoodlesDemoViewController *controller = weakSelf;
+    if (controller) [controller showErrorToast:message];
   };
   [self refreshOutputImage];
+}
+
+- (void)showErrorToast:(NSString *)message {
+  const NSUInteger generation = ++_toastGeneration;
+  _toastLabel.stringValue = message.length > 0 ? message : @"Invalid graph";
+  _toastLabel.hidden = NO;
+  _toastLabel.alphaValue = 1.0;
+  __weak NoodlesDemoViewController *weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.4 * NSEC_PER_SEC)),
+                 dispatch_get_main_queue(), ^{
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || generation != controller->_toastGeneration) return;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+      context.duration = 0.3;
+      controller->_toastLabel.animator.alphaValue = 0.0;
+    } completionHandler:^{
+      NoodlesDemoViewController *inner = weakSelf;
+      if (!inner || generation != inner->_toastGeneration) return;
+      inner->_toastLabel.hidden = YES;
+      inner->_toastLabel.alphaValue = 1.0;
+    }];
+  });
+}
+
+- (void)addDemoNode:(NSButton *)sender {
+  namespace demo = noodles::demo::examples;
+  NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Add Node"];
+  for (int kind = 0; kind < demo::kDemoOpKindCount; ++kind) {
+    NSMenuItem *item = [[NSMenuItem alloc]
+        initWithTitle:@(demo::DemoOpKindTitle(static_cast<demo::DemoOpKind>(kind)))
+               action:@selector(addNodeKindChosen:)
+        keyEquivalent:@""];
+    item.target = self;
+    item.tag = kind;
+    [menu addItem:item];
+  }
+  [menu popUpMenuPositioningItem:nil
+                      atLocation:NSMakePoint(0.0, NSHeight(sender.bounds))
+                          inView:sender];
+}
+
+- (void)addNodeKindChosen:(NSMenuItem *)item {
+  [self addDemoNodeOfKind:item.tag];
+}
+
+- (void)addDemoNodeOfKind:(NSInteger)kindIndex {
+  namespace demo = noodles::demo::examples;
+  if (!_fixture.editor || !_fixture.document) return;
+  if (kindIndex < 0 || kindIndex >= demo::kDemoOpKindCount) return;
+  const auto kind = static_cast<demo::DemoOpKind>(kindIndex);
+  const std::string title = demo::DemoOpKindTitle(kind);
+  int index = 1;
+  std::string nodeId = "/Demo/" + title + "1";
+  while (_fixture.document->containsNode(nodeId)) {
+    ++index;
+    nodeId = "/Demo/" + title + std::to_string(index);
+  }
+  noodles::demo::GraphNode node = demo::MakeDemoOpNode(
+      kind, nodeId, title + " " + std::to_string(index));
+  if (!_fixture.editor->createNodeAutoPlaced(std::move(node))) {
+    _statusLabel.stringValue = @"Could not add a node";
+  }
+}
+
+- (void)graphChanged:(NSSegmentedControl *)sender {
+  [self activateGraphVariant:sender.selectedSegment];
+}
+
+- (void)activateGraphVariant:(NSInteger)index {
+  namespace demo = noodles::demo::examples;
+  if (index < 0 || index >= demo::kDemoGraphVariantCount ||
+      index == _activeVariant) {
+    return;
+  }
+  const auto variant = static_cast<demo::DemoGraphVariant>(index);
+  auto &document = _documents[static_cast<std::size_t>(index)];
+  if (!document) {
+    document = demo::CreateDemoGraphDocument(variant);
+    // A lazily built graph adopts the already-chosen source image so its
+    // Source Image row matches what RenderDemoImage will show.
+    if (_sourceImagePath.length > 0) {
+      document->setStringAttributeValue("/Demo/SourceImage", "path",
+                                        _sourceImagePath.UTF8String,
+                                        _displayFrame);
+    }
+  }
+  _activeVariant = index;
+  _fixture.document = document;
+  _fixture.editor->setDocument(document);
+  [_graphView reloadGraph];
+  _didFrameGraph = [_graphView frameAllWithPadding:32.0];
+  [self refreshOutputImage];
+  _statusLabel.stringValue =
+      [NSString stringWithFormat:@"Graph: %s", demo::DemoGraphVariantTitle(variant)];
+  _selectionLabel.stringValue = @"No selection";
 }
 
 - (void)refreshOutputImageLive:(BOOL)live {
@@ -295,9 +446,16 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
         return;
       }
       controller->_sourceImage = std::move(*decoded);
+      controller->_sourceImagePath = path;
       const char *utf8Path = path.UTF8String;
-      controller->_fixture.document->setStringAttributeValue(
-          "/Demo/SourceImage", "path", utf8Path ? utf8Path : "", controller->_displayFrame);
+      // The decoded image feeds every graph's renderer, so author the path
+      // into each already-built document, not only the visible one.
+      for (const auto &document : controller->_documents) {
+        if (!document) continue;
+        document->setStringAttributeValue(
+            "/Demo/SourceImage", "path", utf8Path ? utf8Path : "",
+            controller->_displayFrame);
+      }
       [controller refreshOutputImage];
       controller->_statusLabel.stringValue =
           [NSString stringWithFormat:@"Source image: %@", path.lastPathComponent];

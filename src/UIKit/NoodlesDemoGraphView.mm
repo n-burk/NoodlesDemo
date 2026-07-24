@@ -195,6 +195,14 @@ NSString *ToNSString(const std::string &value) {
       view.onAttributeEdited(identifier, attribute, live ? YES : NO);
     }
   };
+  delegate.configurationError = [weakSelf](const std::string &message) {
+    NSString *text = ToNSString(message);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      NoodlesDemoGraphView *view = weakSelf;
+      if (view.onConfigurationError)
+        view.onConfigurationError(text);
+    });
+  };
   _editor->setDelegate(std::move(delegate));
 }
 
@@ -793,6 +801,11 @@ NSString *ToNSString(const std::string &value) {
 - (void)setValueScrubEnabled:(BOOL)enabled {
   if (_editor)
     _editor->setValueScrubEnabled(enabled == YES);
+}
+
+- (void)setLinkFadingEnabled:(BOOL)enabled {
+  if (_editor)
+    _editor->setLinkFadingEnabled(enabled == YES);
 }
 
 - (void)setDisplayFrame:(double)frame {

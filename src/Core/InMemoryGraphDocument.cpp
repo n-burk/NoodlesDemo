@@ -295,6 +295,10 @@ GraphSnapshot InMemoryGraphDocument::snapshot(double displayFrame) const {
   return result;
 }
 
+bool InMemoryGraphDocument::createNode(GraphNode node) {
+  return addNode(std::move(node));
+}
+
 bool InMemoryGraphDocument::containsNode(const std::string& nodeId) const {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   const auto found = impl_->nodes.find(nodeId);

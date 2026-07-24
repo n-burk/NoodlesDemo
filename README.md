@@ -28,9 +28,37 @@ Pencil behaves like touch across the graph surface.
 
 ## Runnable demo surface
 
-The runnable macOS and iPadOS products are both named NoodlesDemo. They render
-the same six-node, topology-driven image pipeline, with every node initially
-visible:
+The runnable macOS and iPadOS products are both named NoodlesDemo. A switcher
+in the control bar selects one of four example documents, each rendered by the
+same shared image processor:
+
+- **Grain Comp** — the six-node contract graph shown below as the everyday
+  finishing comp it implements: generated film grain is graded and merged
+  over the plate through an ellipse matte, with an animated grain grade;
+- **CRT TV** — the classic retro-television effect stack: chromatic color
+  fringing, mixed-in broadcast static, sync jitter, scanlines, and a tube
+  vignette; the static level and fringing are animated, so the frame slider
+  sweeps a clean broadcast into a dying signal;
+- **Kaleidoscope** — the plate folded into mirrored wedges, swirled around
+  the center, posterized into pop-art bands, and tinted; the fold rotation
+  and swirl twist are animated so the frame slider spins the mandala, and a
+  user-picked source image becomes their own kaleidoscope;
+- **Stress Test** — 100+ nodes and noodles placed by the editor's layered
+  auto-layout: eight chains of real image ops (grade, invert, wave, pixelate)
+  merge through a mix tree into the composite, so every node executes per
+  pixel and scrubbing any op visibly changes the render while probing
+  editing, navigation, and rendering throughput at scale.
+
+Each graph keeps its edits while the app runs; switching back restores them.
+The Add Node control offers a palette of executable op types — Grade, Invert,
+Pixelate, Wave, Mix, Noise, Blur, Threshold, Tint, Chroma, Scanlines,
+Vignette, Kaleido, Swirl, Posterize, and Halftone — placed by the editor's
+incremental auto-layout; each has a real exec function in the shared image
+processor, so a new node changes the render as soon as it is wired between an
+image source and Display (Halftone plus Posterize, for example, builds a
+comic-print look from any graph).
+The default Composite document renders the same six-node, topology-driven
+image pipeline as before, with every node initially visible:
 
 [![Watch the NoodlesDemo graph editor demo](media/demo-poster.jpg)](media/demo.mp4)
 

@@ -34,11 +34,17 @@ struct GraphEditDelegate {
       attributeEdited;
   // A no-move middle-row tap on a display-only attribute. This requests host
   // UI (for example an asset picker); it is not a document edit and therefore
-  // does not open the beginEdit/endEdit envelope. Kept last so adding this hook
-  // does not disturb positional aggregate initializers for older delegates.
+  // does not open the beginEdit/endEdit envelope.
   std::function<void(const std::string& nodeId,
                      const std::string& attributeName)>
       attributeActivated;
+  // An editor-authored topology edit left the document in an invalid graph
+  // configuration (a feedback loop, or an input driven by several outputs).
+  // The edit is still applied — hosts surface the message, typically as a
+  // transient error toast. Fired after the edit's beginEdit/endEdit envelope
+  // closes. New hooks are appended so positional aggregate initializers for
+  // older delegates keep compiling.
+  std::function<void(const std::string& message)> configurationError;
 };
 
 struct GraphPinInfo {
@@ -98,6 +104,17 @@ class GraphEditor {
   void setValueScrubEnabled(bool enabled);
   void setDisplayFrame(double frame);
 
+  // Distance-based link fading (the noodles link-dimming shader path): a
+  // noodle whose nearest endpoint sits farther than endFrac × the larger
+  // viewport world dimension from the viewport center starts fading, and is
+  // almost fully faded by startFrac. Enabled by default with the reference
+  // band (0.7, 0.5); dense graphs read better with a tighter band such as
+  // (0.6, 0.3). Fractions are clamped to [0, 4] and reordered so the start
+  // of the band is never nearer than its end.
+  void setLinkFadingEnabled(bool enabled);
+  bool linkFadingEnabled() const;
+  void setLinkFadeRange(double startFrac, double endFrac);
+
   // Apply queued external value/position changes. Structural changes are
   // surfaced through GraphEditDelegate::graphStructureChanged so the shell can
   // schedule refresh() on its serialized render thread.
@@ -147,6 +164,20 @@ class GraphEditor {
   bool addPrimNodeAt(const std::string& nodeId, double viewX, double viewY) {
     return addNodeAt(nodeId, viewX, viewY);
   }
+  // Create a brand-new document node (GraphDocument::createNode) and place it
+  // centered under the drop point, as one editor-authored topology edit. The
+  // node id must be unused; documents that cannot author new objects reject it.
+  bool createNodeAt(GraphNode node, double viewX, double viewY);
+  // Like createNodeAt, but the position comes from the same incremental
+  // auto-layout used for nodes that appear without a home: right of the
+  // current graph content, pushed clear of overlaps, so repeated adds never
+  // stack on one point.
+  bool createNodeAutoPlaced(GraphNode node);
+
+  // Current invalid-configuration diagnostics for the document graph (empty =
+  // valid). The same check feeds GraphEditDelegate::configurationError after
+  // every editor-authored topology edit.
+  std::vector<std::string> configurationIssues() const;
 
  private:
   struct Impl;

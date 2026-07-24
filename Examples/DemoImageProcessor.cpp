@@ -1,17 +1,23 @@
 #include "DemoImageProcessor.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace noodles::demo::examples {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+
+// Hard ceiling on node executions per pixel. Ordinary graphs stay linear in
+// node count; this only stops pathological authored fan-out (stacked diamond
+// Mix chains) from exploding, deterministically yielding the no-signal result.
+constexpr int kEvalBudget = 4096;
 
 struct Rgb {
   double r = 0.0;
@@ -37,33 +43,6 @@ Rgb Mix(const Rgb& a, const Rgb& b, double amount) {
 
 Rgb Scale(const Rgb& color, double scale) {
   return {color.r * scale, color.g * scale, color.b * scale};
-}
-
-const GraphProperty* FindProperty(const GraphSnapshot& snapshot,
-                                  const std::string& nodeId,
-                                  const std::string& propertyName) {
-  for (const GraphNode& node : snapshot.nodes) {
-    if (node.id != nodeId) continue;
-    for (const GraphProperty& property : node.properties) {
-      if (property.name == propertyName) return &property;
-    }
-  }
-  return nullptr;
-}
-
-double Number(const GraphSnapshot& snapshot, const std::string& nodeId,
-              const std::string& propertyName, double fallback) {
-  const GraphProperty* property = FindProperty(snapshot, nodeId, propertyName);
-  if (!property || !property->hasValue ||
-      !std::isfinite(property->numericValue)) {
-    return fallback;
-  }
-  return property->numericValue;
-}
-
-bool Toggle(const GraphSnapshot& snapshot, const std::string& nodeId,
-            const std::string& propertyName, bool fallback) {
-  return Number(snapshot, nodeId, propertyName, fallback ? 1.0 : 0.0) >= 0.5;
 }
 
 // A procedural photo surrogate: sky, sun, distant mountains and foreground.
@@ -137,91 +116,124 @@ struct MaskSample {
   bool valid = false;
 };
 
-const GraphEdge* FindIncomingEdge(const GraphSnapshot& snapshot,
-                                  const std::string& inputNodeId,
-                                  const std::string& inputPort) {
-  // InMemoryGraphDocument permits multiple authored sources for one input.
-  // Prefer the most recently authored edge so a newly drawn noodle takes
-  // effect immediately, even before the older noodle is explicitly lifted.
-  for (auto edge = snapshot.edges.rbegin(); edge != snapshot.edges.rend();
-       ++edge) {
-    if (!edge->isRelationship && edge->sourceNodeId == inputNodeId &&
-        edge->sourcePort == inputPort) {
-      return &*edge;
-    }
+const GraphProperty* FindNodeProperty(const GraphNode& node,
+                                      const std::string& propertyName) {
+  for (const GraphProperty& property : node.properties) {
+    if (property.name == propertyName) return &property;
   }
   return nullptr;
 }
 
-bool IsTypedOutput(const GraphSnapshot& snapshot, const GraphEdge& edge,
-                   const std::string& type) {
-  if (edge.targetPort.empty()) return false;
-  const GraphProperty* property =
-      FindProperty(snapshot, edge.targetNodeId, edge.targetPort);
-  return property && property->direction == GraphPropertyDirection::Output &&
-         property->type == type;
+double Number(const GraphNode& node, const std::string& propertyName,
+              double fallback) {
+  const GraphProperty* property = FindNodeProperty(node, propertyName);
+  if (!property || !property->hasValue ||
+      !std::isfinite(property->numericValue)) {
+    return fallback;
+  }
+  return property->numericValue;
 }
 
-enum class DemoNode : std::uint8_t {
+bool Toggle(const GraphNode& node, const std::string& propertyName,
+            bool fallback) {
+  return Number(node, propertyName, fallback ? 1.0 : 0.0) >= 0.5;
+}
+
+// Every schema type the demos author has an exec function below; a node's
+// operation is chosen by its type (and, for the reused Generator/Processor
+// types, by its property signature), never by its id, so nodes added at
+// runtime execute exactly like the fixture's.
+enum class OpKind : std::uint8_t {
   Invalid = 0,
-  SourceImage,
-  Noise,
-  Grade,
-  Composite,
-  Mask,
+  Source,     // Generator with a "path" asset: picked image or landscape
+  Noise,      // Generator with "noise:*" controls
+  Signal,     // Generator with plain frequency/amplitude controls
+  Grade,      // Processor: out = mix(in, in * gain, mix)
+  Composite,  // Processor with background/foreground and a mask relationship
+  Invert,     // out = mix(in, 1 - in, mix)
+  Pixelate,   // samples its input on a quantized uv grid
+  Wave,       // samples its input through a sine uv distortion
+  MixOp,      // out = mix(input, blend, mix)
+  Blur,        // 3×3 box average of its input at ±radius
+  Threshold,   // luma bright-pass: keeps highlights, crushes the rest
+  Tint,        // per-channel gain (red/green/blue)
+  ChromaShift, // chromatic aberration: R/B sampled at radial offsets
+  Scanlines,   // CRT-style horizontal line attenuation
+  Vignette,    // radial edge darkening
+  Kaleido,     // polar mirror fold into rotated wedges
+  Swirl,       // rotational uv distortion around the center
+  Posterize,   // per-channel quantization to N levels
+  Halftone,    // comic-print color dots on a cell grid
+  Mask,        // Shape: ellipse mask sampled through a relationship
+  Display,     // Output: render root with exposure/visible
 };
 
-DemoNode DemoNodeFromId(const std::string& nodeId) {
-  if (nodeId == "/Demo/SourceImage") return DemoNode::SourceImage;
-  if (nodeId == "/Demo/Noise") return DemoNode::Noise;
-  if (nodeId == "/Demo/Grade") return DemoNode::Grade;
-  if (nodeId == "/Demo/Composite") return DemoNode::Composite;
-  if (nodeId == "/Demo/Mask") return DemoNode::Mask;
-  return DemoNode::Invalid;
+OpKind KindOfNode(const GraphNode& node) {
+  const std::string& type = node.schemaTypeName;
+  if (type == "Output") return OpKind::Display;
+  if (type == "Shape") return OpKind::Mask;
+  if (type == "Invert") return OpKind::Invert;
+  if (type == "Pixelate") return OpKind::Pixelate;
+  if (type == "Wave") return OpKind::Wave;
+  if (type == "Mix") return OpKind::MixOp;
+  if (type == "Blur") return OpKind::Blur;
+  if (type == "Threshold") return OpKind::Threshold;
+  if (type == "Tint") return OpKind::Tint;
+  if (type == "Chroma") return OpKind::ChromaShift;
+  if (type == "Scanlines") return OpKind::Scanlines;
+  if (type == "Vignette") return OpKind::Vignette;
+  if (type == "Kaleido") return OpKind::Kaleido;
+  if (type == "Swirl") return OpKind::Swirl;
+  if (type == "Posterize") return OpKind::Posterize;
+  if (type == "Halftone") return OpKind::Halftone;
+  if (type == "Generator") {
+    if (FindNodeProperty(node, "path")) return OpKind::Source;
+    if (FindNodeProperty(node, "noise:frequency")) return OpKind::Noise;
+    if (FindNodeProperty(node, "frequency")) return OpKind::Signal;
+    return OpKind::Invalid;
+  }
+  if (type == "Processor") {
+    if (FindNodeProperty(node, "background") &&
+        FindNodeProperty(node, "foreground")) {
+      return OpKind::Composite;
+    }
+    return OpKind::Grade;
+  }
+  return OpKind::Invalid;
 }
 
-constexpr std::uint32_t NodeBit(DemoNode node) {
-  return 1U << static_cast<std::uint32_t>(node);
-}
+struct EvalNode {
+  OpKind kind = OpKind::Invalid;
+  int inputA = -1;     // input / background / surface
+  int inputB = -1;     // blend / foreground
+  int maskIndex = -1;  // composite mask relationship target
+  double p0 = 0.0;     // kind-specific: bias/frequency/size/amplitude/...
+  double p1 = 0.0;
+  double p2 = 0.0;
+  double gain = 1.0;
+  double mixAmount = 1.0;  // mix / opacity
+  bool flag = true;        // enabled / invert / visible
+};
 
 class GraphEvaluator {
  public:
   GraphEvaluator(const GraphSnapshot& snapshot,
                  const DemoRgbaImage* sourceImage, int outputWidth,
-                 int outputHeight) {
-    displayInput_ = ResolveInput(snapshot, "/Demo/Display", "surface", "image");
-    gradeInput_ = ResolveInput(snapshot, "/Demo/Grade", "input", "image");
-    compositeBackground_ =
-        ResolveInput(snapshot, "/Demo/Composite", "background", "image");
-    compositeForeground_ =
-        ResolveInput(snapshot, "/Demo/Composite", "foreground", "image");
-    compositeMask_ =
-        ResolveRelationship(snapshot, "/Demo/Composite", "mask");
-
-    sourceBrightness_ = Clamp(
-        Number(snapshot, "/Demo/SourceImage", "brightness", 1.0), 0.0, 4.0);
-    sourceBias_ =
-        Clamp(Number(snapshot, "/Demo/SourceImage", "bias", 0.0), -1.0, 1.0);
-    sourceEnabled_ = Toggle(snapshot, "/Demo/SourceImage", "enabled", true);
-    noiseFrequency_ = Clamp(
-        Number(snapshot, "/Demo/Noise", "noise:frequency", 2.5), 0.05, 24.0);
-    noiseAmplitude_ =
-        Clamp(Number(snapshot, "/Demo/Noise", "noise:amplitude", 0.75), 0.0,
-              2.0);
-    noiseEnabled_ = Toggle(snapshot, "/Demo/Noise", "enabled", true);
-    gradeGain_ = Clamp(Number(snapshot, "/Demo/Grade", "gain", 1.0), 0.0, 4.0);
-    gradeMix_ = Clamp(Number(snapshot, "/Demo/Grade", "mix", 1.0), 0.0, 1.0);
-    compositeOpacity_ =
-        Clamp(Number(snapshot, "/Demo/Composite", "opacity", 1.0), 0.0, 1.0);
-    maskRadius_ =
-        Clamp(Number(snapshot, "/Demo/Mask", "radius", 0.65), 0.04, 1.4);
-    maskFeather_ =
-        Clamp(Number(snapshot, "/Demo/Mask", "feather", 0.12), 0.002, 0.75);
-    maskInvert_ = Toggle(snapshot, "/Demo/Mask", "invert", false);
-    displayExposureScale_ = std::pow(
-        2.0,
-        Clamp(Number(snapshot, "/Demo/Display", "exposure", 0.0), -6.0, 6.0));
-    displayVisible_ = Toggle(snapshot, "/Demo/Display", "visible", true);
+                 int outputHeight)
+      : snapshot_(snapshot) {
+    std::unordered_map<std::string, int> indexOf;
+    nodes_.reserve(snapshot.nodes.size());
+    for (const GraphNode& node : snapshot.nodes) {
+      indexOf.emplace(node.id, static_cast<int>(nodes_.size()));
+      nodes_.push_back(BuildNode(node));
+      if (nodes_.back().kind == OpKind::Display && root_ < 0) {
+        root_ = static_cast<int>(nodes_.size()) - 1;
+      }
+    }
+    for (std::size_t i = 0; i < snapshot.nodes.size(); ++i) {
+      ResolveInputs(snapshot.nodes[i], nodes_[i], indexOf);
+    }
+    active_.assign(nodes_.size(), 0);
 
     if (ValidSourceImage(sourceImage)) {
       sourceImage_ = sourceImage;
@@ -238,48 +250,193 @@ class GraphEvaluator {
   }
 
   Rgb DisplayPixel(double u, double v) const {
-    if (!displayVisible_) return {0.012, 0.016, 0.024};
-    PixelCache cache;
-    const ImageSample surface = ImageNode(displayInput_, u, v, 0U, cache);
-    return Scale(surface.valid ? surface.color : NoSignal(u, v),
-                 displayExposureScale_);
+    const EvalNode* display = root_ >= 0 ? &nodes_[root_] : nullptr;
+    if (display && !display->flag) return {0.012, 0.016, 0.024};
+    budget_ = kEvalBudget;
+    std::fill(active_.begin(), active_.end(), std::uint8_t{0});
+    const ImageSample surface =
+        EvalImage(display ? display->inputA : -1, u, v);
+    const double exposure = display ? display->p0 : 1.0;
+    return Scale(surface.valid ? surface.color : NoSignal(u, v), exposure);
   }
 
  private:
-  struct PixelCache {
-    std::array<ImageSample, 6> images{};
-    std::array<MaskSample, 6> masks{};
-    std::uint32_t computedImages = 0U;
-    std::uint32_t computedMasks = 0U;
-  };
-
-  static DemoNode ResolveInput(const GraphSnapshot& snapshot,
-                               const std::string& inputNodeId,
-                               const std::string& inputPort,
-                               const std::string& expectedType) {
-    const GraphEdge* edge = FindIncomingEdge(snapshot, inputNodeId, inputPort);
-    if (!edge || !IsTypedOutput(snapshot, *edge, expectedType)) {
-      return DemoNode::Invalid;
+  static EvalNode BuildNode(const GraphNode& node) {
+    EvalNode result;
+    result.kind = KindOfNode(node);
+    switch (result.kind) {
+      case OpKind::Source:
+        result.gain = Clamp(Number(node, "brightness", 1.0), 0.0, 4.0);
+        result.p0 = Clamp(Number(node, "bias", 0.0), -1.0, 1.0);
+        result.flag = Toggle(node, "enabled", true);
+        break;
+      case OpKind::Noise:
+        result.p0 = Clamp(Number(node, "noise:frequency", 2.5), 0.05, 24.0);
+        result.p1 = Clamp(Number(node, "noise:amplitude", 0.75), 0.0, 2.0);
+        result.flag = Toggle(node, "enabled", true);
+        break;
+      case OpKind::Signal:
+        result.p0 = Clamp(Number(node, "frequency", 2.0), 0.05, 32.0);
+        result.p1 = Clamp(Number(node, "amplitude", 0.8), 0.0, 2.0);
+        break;
+      case OpKind::Grade:
+        result.gain = Clamp(Number(node, "gain", 1.0), 0.0, 4.0);
+        result.mixAmount = Clamp(Number(node, "mix", 1.0), 0.0, 1.0);
+        break;
+      case OpKind::Composite:
+        result.mixAmount = Clamp(Number(node, "opacity", 1.0), 0.0, 1.0);
+        break;
+      case OpKind::Invert:
+        result.mixAmount = Clamp(Number(node, "mix", 1.0), 0.0, 1.0);
+        break;
+      case OpKind::Pixelate:
+        result.p0 = Clamp(Number(node, "size", 0.04), 0.002, 0.5);
+        break;
+      case OpKind::Wave:
+        result.p0 = Clamp(Number(node, "amplitude", 0.03), 0.0, 0.5);
+        result.p1 = Clamp(Number(node, "frequency", 6.0), 0.05, 40.0);
+        break;
+      case OpKind::MixOp:
+        result.mixAmount = Clamp(Number(node, "mix", 0.5), 0.0, 1.0);
+        break;
+      case OpKind::Blur:
+        result.p0 = Clamp(Number(node, "radius", 0.02), 0.0, 0.2);
+        break;
+      case OpKind::Threshold:
+        result.p0 = Clamp(Number(node, "threshold", 0.7), 0.0, 1.0);
+        result.p1 = Clamp(Number(node, "softness", 0.1), 0.001, 0.5);
+        break;
+      case OpKind::Tint:
+        result.p0 = Clamp(Number(node, "red", 1.0), 0.0, 4.0);
+        result.p1 = Clamp(Number(node, "green", 1.0), 0.0, 4.0);
+        result.p2 = Clamp(Number(node, "blue", 1.0), 0.0, 4.0);
+        break;
+      case OpKind::ChromaShift:
+        result.p0 = Clamp(Number(node, "shift", 0.015), 0.0, 0.1);
+        break;
+      case OpKind::Scanlines:
+        result.p0 = Clamp(Number(node, "lines", 180.0), 10.0, 600.0);
+        result.p1 = Clamp(Number(node, "strength", 0.35), 0.0, 1.0);
+        break;
+      case OpKind::Vignette:
+        result.p0 = Clamp(Number(node, "strength", 0.5), 0.0, 1.0);
+        result.p1 = Clamp(Number(node, "radius", 0.35), 0.0, 1.0);
+        break;
+      case OpKind::Kaleido:
+        result.p0 = Clamp(std::floor(Number(node, "segments", 6.0)), 1.0, 32.0);
+        result.p1 = Clamp(Number(node, "rotation", 0.0), -16.0, 16.0);
+        break;
+      case OpKind::Swirl:
+        result.p0 = Clamp(Number(node, "twist", 1.2), -8.0, 8.0);
+        result.p1 = Clamp(Number(node, "radius", 0.7), 0.05, 1.5);
+        break;
+      case OpKind::Posterize:
+        result.p0 = Clamp(std::floor(Number(node, "levels", 5.0)), 2.0, 32.0);
+        break;
+      case OpKind::Halftone:
+        result.p0 = Clamp(Number(node, "cells", 60.0), 8.0, 200.0);
+        result.p1 = Clamp(Number(node, "scale", 1.0), 0.2, 2.0);
+        break;
+      case OpKind::Mask:
+        result.p0 = Clamp(Number(node, "radius", 0.65), 0.04, 1.4);
+        result.p1 = Clamp(Number(node, "feather", 0.12), 0.002, 0.75);
+        result.flag = Toggle(node, "invert", false);
+        break;
+      case OpKind::Display:
+        result.p0 =
+            std::pow(2.0, Clamp(Number(node, "exposure", 0.0), -6.0, 6.0));
+        result.flag = Toggle(node, "visible", true);
+        break;
+      case OpKind::Invalid:
+        break;
     }
-    return DemoNodeFromId(edge->targetNodeId);
+    return result;
   }
 
-  static DemoNode ResolveRelationship(const GraphSnapshot& snapshot,
-                                      const std::string& sourceNodeId,
-                                      const std::string& relationshipName) {
-    const GraphProperty* property =
-        FindProperty(snapshot, sourceNodeId, relationshipName);
-    if (!property || property->kind != GraphPropertyKind::Relationship) {
-      return DemoNode::Invalid;
+  void ResolveInputs(const GraphNode& node, EvalNode& eval,
+                     const std::unordered_map<std::string, int>& indexOf) {
+    switch (eval.kind) {
+      case OpKind::Grade:
+      case OpKind::Invert:
+      case OpKind::Pixelate:
+      case OpKind::Wave:
+      case OpKind::Blur:
+      case OpKind::Threshold:
+      case OpKind::Tint:
+      case OpKind::ChromaShift:
+      case OpKind::Scanlines:
+      case OpKind::Vignette:
+      case OpKind::Kaleido:
+      case OpKind::Swirl:
+      case OpKind::Posterize:
+      case OpKind::Halftone:
+        eval.inputA = ResolveInput(node.id, "input", indexOf);
+        break;
+      case OpKind::MixOp:
+        eval.inputA = ResolveInput(node.id, "input", indexOf);
+        eval.inputB = ResolveInput(node.id, "blend", indexOf);
+        break;
+      case OpKind::Composite:
+        eval.inputA = ResolveInput(node.id, "background", indexOf);
+        eval.inputB = ResolveInput(node.id, "foreground", indexOf);
+        eval.maskIndex = ResolveRelationship(node, "mask", indexOf);
+        break;
+      case OpKind::Display:
+        eval.inputA = ResolveInput(node.id, "surface", indexOf);
+        break;
+      case OpKind::Source:
+      case OpKind::Noise:
+      case OpKind::Signal:
+      case OpKind::Mask:
+      case OpKind::Invalid:
+        break;
     }
-    for (auto edge = snapshot.edges.rbegin(); edge != snapshot.edges.rend();
+  }
+
+  // The most recently authored edge into (inputNodeId, inputPort) wins, so a
+  // newly drawn noodle takes effect immediately, even before the older noodle
+  // is explicitly lifted. The winning edge must point at a typed image output.
+  int ResolveInput(const std::string& inputNodeId, const std::string& inputPort,
+                   const std::unordered_map<std::string, int>& indexOf) const {
+    for (auto edge = snapshot_.edges.rbegin(); edge != snapshot_.edges.rend();
          ++edge) {
-      if (edge->isRelationship && edge->sourceNodeId == sourceNodeId &&
+      if (edge->isRelationship || edge->sourceNodeId != inputNodeId ||
+          edge->sourcePort != inputPort) {
+        continue;
+      }
+      if (edge->targetPort.empty()) return -1;
+      auto nodeIt = indexOf.find(edge->targetNodeId);
+      if (nodeIt == indexOf.end()) return -1;
+      const GraphProperty* property = FindNodeProperty(
+          snapshot_.nodes[static_cast<std::size_t>(nodeIt->second)],
+          edge->targetPort);
+      if (!property ||
+          property->direction != GraphPropertyDirection::Output ||
+          property->type != "image") {
+        return -1;
+      }
+      return nodeIt->second;
+    }
+    return -1;
+  }
+
+  int ResolveRelationship(
+      const GraphNode& node, const std::string& relationshipName,
+      const std::unordered_map<std::string, int>& indexOf) const {
+    const GraphProperty* property =
+        FindNodeProperty(node, relationshipName);
+    if (!property || property->kind != GraphPropertyKind::Relationship) {
+      return -1;
+    }
+    for (auto edge = snapshot_.edges.rbegin(); edge != snapshot_.edges.rend();
+         ++edge) {
+      if (edge->isRelationship && edge->sourceNodeId == node.id &&
           edge->sourcePort == relationshipName && edge->targetPort.empty()) {
-        return DemoNodeFromId(edge->targetNodeId);
+        auto nodeIt = indexOf.find(edge->targetNodeId);
+        return nodeIt == indexOf.end() ? -1 : nodeIt->second;
       }
     }
-    return DemoNode::Invalid;
+    return -1;
   }
 
   static bool ValidSourceImage(const DemoRgbaImage* image) {
@@ -321,54 +478,239 @@ class GraphEvaluator {
     return Mix(top, bottom, py - static_cast<double>(y0));
   }
 
-  ImageSample ImageNode(DemoNode node, double u, double v,
-                        std::uint32_t activeNodes, PixelCache& cache) const {
-    if (node == DemoNode::Invalid || node == DemoNode::Mask) return {};
-    const std::uint32_t bit = NodeBit(node);
-    const std::size_t index = static_cast<std::size_t>(node);
-    if ((cache.computedImages & bit) != 0U) return cache.images[index];
-    if ((activeNodes & bit) != 0U) return {};
-    activeNodes |= bit;
+  ImageSample EvalImage(int index, double u, double v) const {
+    if (index < 0 || budget_ <= 0) return {};
+    --budget_;
+    if (active_[static_cast<std::size_t>(index)]) return {};  // feedback loop
+    const EvalNode& n = nodes_[static_cast<std::size_t>(index)];
 
     ImageSample result;
-    switch (node) {
-      case DemoNode::SourceImage: {
-        if (!sourceEnabled_) {
+    active_[static_cast<std::size_t>(index)] = 1;
+    switch (n.kind) {
+      case OpKind::Source: {
+        if (!n.flag) {
           result = {{0.0, 0.0, 0.0}, true};
           break;
         }
-        const Rgb source = Scale(SourcePixel(u, v), sourceBrightness_);
-        result = {{source.r + sourceBias_, source.g + sourceBias_,
-                   source.b + sourceBias_},
-                  true};
+        const Rgb source = Scale(SourcePixel(u, v), n.gain);
+        result = {{source.r + n.p0, source.g + n.p0, source.b + n.p0}, true};
         break;
       }
-      case DemoNode::Noise: {
-        if (!noiseEnabled_) {
+      case OpKind::Noise: {
+        if (!n.flag) {
           result = {{0.0, 0.0, 0.0}, true};
           break;
         }
         const double noise =
-            Clamp(0.5 + ProceduralNoise(u, v, noiseFrequency_) * 0.5 *
-                            noiseAmplitude_,
-                  0.0, 1.0);
+            Clamp(0.5 + ProceduralNoise(u, v, n.p0) * 0.5 * n.p1, 0.0, 1.0);
         result = {{noise, noise * 0.88 + 0.04, noise * 0.72 + 0.10}, true};
         break;
       }
-      case DemoNode::Grade: {
-        const ImageSample input =
-            ImageNode(gradeInput_, u, v, activeNodes, cache);
+      case OpKind::Signal: {
+        const double wobble =
+            ProceduralNoise(u * 0.83 + 0.11, v * 1.07 - 0.05, n.p0) * 0.5 *
+            n.p1;
+        const double band =
+            0.5 + 0.5 * std::sin((u * n.p0 + v * 0.35 + wobble) * kPi * 2.0);
+        result = {{0.08 + band * 0.22, 0.10 + band * 0.55,
+                   0.16 + band * 0.74},
+                  true};
+        break;
+      }
+      case OpKind::Grade: {
+        const ImageSample input = EvalImage(n.inputA, u, v);
         if (input.valid) {
-          result = {Mix(input.color, Scale(input.color, gradeGain_), gradeMix_),
+          result = {Mix(input.color, Scale(input.color, n.gain), n.mixAmount),
                     true};
         }
         break;
       }
-      case DemoNode::Composite: {
-        const ImageSample background =
-            ImageNode(compositeBackground_, u, v, activeNodes, cache);
-        const ImageSample foreground =
-            ImageNode(compositeForeground_, u, v, activeNodes, cache);
+      case OpKind::Invert: {
+        const ImageSample input = EvalImage(n.inputA, u, v);
+        if (input.valid) {
+          const Rgb inverted{1.0 - input.color.r, 1.0 - input.color.g,
+                             1.0 - input.color.b};
+          result = {Mix(input.color, inverted, n.mixAmount), true};
+        }
+        break;
+      }
+      case OpKind::Pixelate: {
+        const double size = n.p0;
+        const double pu =
+            Clamp((std::floor(u / size) + 0.5) * size, 0.0, 1.0);
+        const double pv =
+            Clamp((std::floor(v / size) + 0.5) * size, 0.0, 1.0);
+        result = EvalImage(n.inputA, pu, pv);
+        break;
+      }
+      case OpKind::Wave: {
+        const double wu =
+            Clamp(u + n.p0 * std::sin(v * n.p1 * kPi * 2.0), 0.0, 1.0);
+        const double wv =
+            Clamp(v + n.p0 * std::sin(u * n.p1 * kPi * 2.0), 0.0, 1.0);
+        result = EvalImage(n.inputA, wu, wv);
+        break;
+      }
+      case OpKind::Blur: {
+        const double radius = n.p0;
+        Rgb sum{};
+        int taps = 0;
+        for (int dy = -1; dy <= 1; ++dy) {
+          for (int dx = -1; dx <= 1; ++dx) {
+            const ImageSample tap =
+                EvalImage(n.inputA, Clamp(u + dx * radius, 0.0, 1.0),
+                          Clamp(v + dy * radius, 0.0, 1.0));
+            if (!tap.valid) continue;
+            sum.r += tap.color.r;
+            sum.g += tap.color.g;
+            sum.b += tap.color.b;
+            ++taps;
+          }
+        }
+        if (taps > 0) result = {Scale(sum, 1.0 / taps), true};
+        break;
+      }
+      case OpKind::Threshold: {
+        const ImageSample input = EvalImage(n.inputA, u, v);
+        if (input.valid) {
+          const double luma = input.color.r * 0.299 + input.color.g * 0.587 +
+                              input.color.b * 0.114;
+          const double keep = SmoothStep(n.p0 - n.p1, n.p0 + n.p1, luma);
+          result = {Scale(input.color, keep), true};
+        }
+        break;
+      }
+      case OpKind::Tint: {
+        const ImageSample input = EvalImage(n.inputA, u, v);
+        if (input.valid) {
+          result = {{input.color.r * n.p0, input.color.g * n.p1,
+                     input.color.b * n.p2},
+                    true};
+        }
+        break;
+      }
+      case OpKind::ChromaShift: {
+        // Lens-style color fringing: R and B are sampled at opposite radial
+        // offsets from the center while G stays put.
+        const double dx = (u - 0.5) * n.p0;
+        const double dy = (v - 0.5) * n.p0;
+        const ImageSample red = EvalImage(n.inputA, Clamp(u + dx, 0.0, 1.0),
+                                          Clamp(v + dy, 0.0, 1.0));
+        const ImageSample green = EvalImage(n.inputA, u, v);
+        const ImageSample blue = EvalImage(n.inputA, Clamp(u - dx, 0.0, 1.0),
+                                           Clamp(v - dy, 0.0, 1.0));
+        if (green.valid) {
+          result = {{red.valid ? red.color.r : green.color.r, green.color.g,
+                     blue.valid ? blue.color.b : green.color.b},
+                    true};
+        }
+        break;
+      }
+      case OpKind::Scanlines: {
+        const ImageSample input = EvalImage(n.inputA, u, v);
+        if (input.valid) {
+          const double line =
+              0.5 + 0.5 * std::sin(v * n.p0 * kPi * 2.0);
+          result = {Scale(input.color, 1.0 - n.p1 * line), true};
+        }
+        break;
+      }
+      case OpKind::Vignette: {
+        const ImageSample input = EvalImage(n.inputA, u, v);
+        if (input.valid) {
+          const double dx = u - 0.5;
+          const double dy = v - 0.5;
+          // Normalized so 1.0 lands on the frame corner.
+          const double distance =
+              std::sqrt(dx * dx + dy * dy) * (1.0 / 0.70710678);
+          const double fall = SmoothStep(n.p1, 1.0, distance);
+          result = {Scale(input.color, 1.0 - n.p0 * fall), true};
+        }
+        break;
+      }
+      case OpKind::Kaleido: {
+        const double cx = u - 0.5;
+        const double cy = v - 0.5;
+        const double radius = std::sqrt(cx * cx + cy * cy);
+        const double wedge = kPi * 2.0 / n.p0;
+        double angle = std::atan2(cy, cx) + n.p1;
+        angle = std::fmod(angle, wedge);
+        if (angle < 0.0) angle += wedge;
+        if (angle > wedge * 0.5) angle = wedge - angle;  // mirror the wedge
+        result = EvalImage(n.inputA,
+                           Clamp(0.5 + radius * std::cos(angle), 0.0, 1.0),
+                           Clamp(0.5 + radius * std::sin(angle), 0.0, 1.0));
+        break;
+      }
+      case OpKind::Swirl: {
+        const double cx = u - 0.5;
+        const double cy = v - 0.5;
+        const double radius = std::sqrt(cx * cx + cy * cy);
+        if (radius < n.p1) {
+          const double falloff = 1.0 - radius / n.p1;
+          const double angle = n.p0 * falloff * falloff;
+          const double ca = std::cos(angle);
+          const double sa = std::sin(angle);
+          result = EvalImage(n.inputA,
+                             Clamp(0.5 + cx * ca - cy * sa, 0.0, 1.0),
+                             Clamp(0.5 + cx * sa + cy * ca, 0.0, 1.0));
+        } else {
+          result = EvalImage(n.inputA, u, v);
+        }
+        break;
+      }
+      case OpKind::Posterize: {
+        const ImageSample input = EvalImage(n.inputA, u, v);
+        if (input.valid) {
+          const double steps = n.p0 - 1.0;
+          const auto quantize = [steps](double value) {
+            return std::round(Clamp(value, 0.0, 1.0) * steps) / steps;
+          };
+          result = {{quantize(input.color.r), quantize(input.color.g),
+                     quantize(input.color.b)},
+                    true};
+        }
+        break;
+      }
+      case OpKind::Halftone: {
+        // Comic-print color dots: each grid cell samples its center once and
+        // draws a dot whose size follows the cell's darkness.
+        const double cells = n.p0;
+        const double cellU = (std::floor(u * cells) + 0.5) / cells;
+        const double cellV = (std::floor(v * cells) + 0.5) / cells;
+        const ImageSample input =
+            EvalImage(n.inputA, Clamp(cellU, 0.0, 1.0), Clamp(cellV, 0.0, 1.0));
+        if (input.valid) {
+          const double luma = Clamp(input.color.r * 0.299 +
+                                        input.color.g * 0.587 +
+                                        input.color.b * 0.114,
+                                    0.0, 1.0);
+          const double dotRadius = 0.5 * n.p1 * (1.0 - luma);
+          const double du = u * cells - std::floor(u * cells) - 0.5;
+          const double dv = v * cells - std::floor(v * cells) - 0.5;
+          const double distance = std::sqrt(du * du + dv * dv);
+          const double ink =
+              1.0 - SmoothStep(dotRadius - 0.06, dotRadius + 0.06, distance);
+          const Rgb paper{0.96, 0.94, 0.9};
+          result = {Mix(paper, Scale(input.color, 0.9), ink), true};
+        }
+        break;
+      }
+      case OpKind::MixOp: {
+        const ImageSample a = EvalImage(n.inputA, u, v);
+        const ImageSample b = EvalImage(n.inputB, u, v);
+        if (a.valid && !b.valid) {
+          result = a;
+        } else if (!a.valid && b.valid) {
+          result = b;
+        } else if (a.valid && b.valid) {
+          result = {Mix(a.color, b.color, n.mixAmount), true};
+        }
+        break;
+      }
+      case OpKind::Composite: {
+        const ImageSample background = EvalImage(n.inputA, u, v);
+        const ImageSample foreground = EvalImage(n.inputB, u, v);
         if (background.valid && !foreground.valid) {
           result = background;
           break;
@@ -378,65 +720,41 @@ class GraphEvaluator {
           break;
         }
         if (background.valid && foreground.valid) {
-          const MaskSample mask =
-              MaskNode(compositeMask_, u, v, activeNodes, cache);
+          const MaskSample mask = EvalMask(n.maskIndex, u, v);
           const double maskValue = mask.valid ? mask.value : 1.0;
-          result = {
-              Mix(background.color, foreground.color,
-                  Clamp(maskValue * compositeOpacity_, 0.0, 1.0)),
-              true};
+          result = {Mix(background.color, foreground.color,
+                        Clamp(maskValue * n.mixAmount, 0.0, 1.0)),
+                    true};
         }
         break;
       }
-      case DemoNode::Invalid:
-      case DemoNode::Mask:
+      case OpKind::Mask:
+      case OpKind::Display:
+      case OpKind::Invalid:
         break;
     }
-
-    cache.images[index] = result;
-    cache.computedImages |= bit;
+    active_[static_cast<std::size_t>(index)] = 0;
     return result;
   }
 
-  MaskSample MaskNode(DemoNode node, double u, double v,
-                      std::uint32_t activeNodes, PixelCache& cache) const {
-    if (node != DemoNode::Mask) return {};
-    const std::uint32_t bit = NodeBit(node);
-    const std::size_t index = static_cast<std::size_t>(node);
-    if ((cache.computedMasks & bit) != 0U) return cache.masks[index];
-    if ((activeNodes & bit) != 0U) return {};
-
-    const double dx = (u - 0.5) / maskRadius_;
-    const double dy = (v - 0.5) / (maskRadius_ * 0.68);
+  MaskSample EvalMask(int index, double u, double v) const {
+    if (index < 0) return {};
+    const EvalNode& n = nodes_[static_cast<std::size_t>(index)];
+    if (n.kind != OpKind::Mask) return {};
+    const double dx = (u - 0.5) / n.p0;
+    const double dy = (v - 0.5) / (n.p0 * 0.68);
     const double ellipseDistance = std::sqrt(dx * dx + dy * dy);
-    double value = 1.0 - SmoothStep(1.0 - maskFeather_, 1.0 + maskFeather_,
-                                    ellipseDistance);
-    if (maskInvert_) value = 1.0 - value;
-    const MaskSample result{value, true};
-    cache.masks[index] = result;
-    cache.computedMasks |= bit;
-    return result;
+    double value =
+        1.0 - SmoothStep(1.0 - n.p1, 1.0 + n.p1, ellipseDistance);
+    if (n.flag) value = 1.0 - value;
+    return {value, true};
   }
 
-  DemoNode displayInput_ = DemoNode::Invalid;
-  DemoNode gradeInput_ = DemoNode::Invalid;
-  DemoNode compositeBackground_ = DemoNode::Invalid;
-  DemoNode compositeForeground_ = DemoNode::Invalid;
-  DemoNode compositeMask_ = DemoNode::Invalid;
-  double sourceBrightness_ = 1.0;
-  double sourceBias_ = 0.0;
-  bool sourceEnabled_ = true;
-  double noiseFrequency_ = 2.5;
-  double noiseAmplitude_ = 0.75;
-  bool noiseEnabled_ = true;
-  double gradeGain_ = 1.0;
-  double gradeMix_ = 1.0;
-  double compositeOpacity_ = 1.0;
-  double maskRadius_ = 0.65;
-  double maskFeather_ = 0.12;
-  bool maskInvert_ = false;
-  double displayExposureScale_ = 1.0;
-  bool displayVisible_ = true;
+  const GraphSnapshot& snapshot_;
+  std::vector<EvalNode> nodes_;
+  int root_ = -1;
+  mutable std::vector<std::uint8_t> active_;
+  mutable int budget_ = kEvalBudget;
   const DemoRgbaImage* sourceImage_ = nullptr;
   double sourceUScale_ = 1.0;
   double sourceVScale_ = 1.0;

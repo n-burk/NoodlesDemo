@@ -167,6 +167,75 @@ void ComputeOrtho(double panX, double panY, double zoom, int vpW, int vpH,
   out[15] = 1.0f;
 }
 
+// ── invalid-configuration diagnostics ────────────────────────────────────────
+// Data-flow diagnostics over the authored document graph. A connection edge is
+// authored on its INPUT side pointing at the OUTPUT side, and a relationship's
+// target feeds its owner, so in both cases data flows
+// edge.targetNodeId → edge.sourceNodeId. The editor deliberately still AUTHORS
+// an invalid configuration (the gesture must land); these diagnostics let a
+// host warn without blocking the edit.
+std::vector<std::string> ConfigurationIssues(const GraphSnapshot& graph) {
+  std::vector<std::string> issues;
+
+  // An input attribute driven by more than one output is ambiguous.
+  std::map<std::pair<std::string, std::string>, int> inputDrivers;
+  for (const GraphEdge& edge : graph.edges) {
+    if (!edge.isRelationship) {
+      ++inputDrivers[{edge.sourceNodeId, edge.sourcePort}];
+    }
+  }
+  for (const auto& [input, count] : inputDrivers) {
+    if (count > 1) {
+      issues.push_back("input " + input.first + "." + input.second + " has " +
+                       std::to_string(count) + " sources");
+    }
+  }
+
+  // A directed cycle in data-flow direction is a feedback loop. Iterative DFS
+  // over sorted adjacency (std::map) keeps the reported cycle deterministic.
+  std::map<std::string, std::vector<std::string>> flow;
+  for (const GraphEdge& edge : graph.edges) {
+    if (edge.sourceNodeId.empty() || edge.targetNodeId.empty()) continue;
+    flow[edge.targetNodeId].push_back(edge.sourceNodeId);
+  }
+  for (auto& [id, downstream] : flow) {
+    std::sort(downstream.begin(), downstream.end());
+  }
+  std::map<std::string, int> state;  // 0 = unvisited, 1 = active, 2 = done
+  std::string cycle;
+  for (const auto& [rootId, rootAdj] : flow) {
+    (void)rootAdj;
+    if (!cycle.empty()) break;
+    if (state[rootId] != 0) continue;
+    std::vector<std::pair<std::string, std::size_t>> path{{rootId, 0}};
+    state[rootId] = 1;
+    while (!path.empty() && cycle.empty()) {
+      auto& frame = path.back();
+      const auto adjacent = flow.find(frame.first);
+      const std::size_t fanout =
+          adjacent == flow.end() ? 0 : adjacent->second.size();
+      if (frame.second >= fanout) {
+        state[frame.first] = 2;
+        path.pop_back();
+        continue;
+      }
+      const std::string next = adjacent->second[frame.second++];
+      if (state[next] == 1) {
+        std::size_t i = 0;
+        while (i < path.size() && path[i].first != next) ++i;
+        cycle = next;
+        for (++i; i < path.size(); ++i) cycle += " → " + path[i].first;
+        cycle += " → " + next;
+      } else if (state[next] == 0) {
+        state[next] = 1;
+        path.push_back({next, 0});
+      }
+    }
+  }
+  if (!cycle.empty()) issues.push_back("feedback loop " + cycle);
+  return issues;
+}
+
 }  // namespace
 
 struct GraphEditor::Impl {
@@ -215,6 +284,9 @@ struct GraphEditor::Impl {
   std::array<float, 4> clearColor{0.0f, 0.0f, 0.0f, 0.0f};
   float overlayOpacity = 0.5f;
   bool valueScrubEnabled = true;
+  // Gates the link shader's distance fade (uDimming); the band itself lives
+  // in config.linkEdgeDimmingStart/End.
+  bool linkFading = true;
 
   // Offscreen pass: the graph renders into `fbo` (RGBA8 color + depth), then a
   // fullscreen quad composites it to the platform's default framebuffer.
@@ -761,7 +833,24 @@ struct GraphEditor::Impl {
       delegate.topologyEdited();
     }
     if (delegate.endEdit) delegate.endEdit();
+    if (changed && topologyEdit) notifyConfigurationIssues();
     return changed;
+  }
+
+  // Warn the host when an applied topology edit left the graph invalid. The
+  // check runs after the edit's envelope closes so an undo integration never
+  // interleaves with the toast.
+  void notifyConfigurationIssues() {
+    if (!document || !delegate.configurationError) return;
+    const std::vector<std::string> issues =
+        ConfigurationIssues(document->snapshot(displayFrame));
+    if (issues.empty()) return;
+    std::string message = "Invalid graph: ";
+    for (std::size_t i = 0; i < issues.size(); ++i) {
+      if (i > 0) message += "; ";
+      message += issues[i];
+    }
+    delegate.configurationError(message);
   }
 
   // Remove the lifted link's edge from the document (reconnect delete side).
@@ -2004,9 +2093,37 @@ void GraphEditor::setDelegate(GraphEditDelegate delegate) {
 }
 
 void GraphEditor::setDocument(std::shared_ptr<GraphDocument> document) {
-  impl_->registerDocumentObserver(document);
-  impl_->buildModel();
-  impl_->requestRender();
+  Impl& s = *impl_;
+  const bool documentChanged = s.document != document;
+  s.registerDocumentObserver(document);
+  if (documentChanged) {
+    // A swapped-in document is a different world even when it reuses node ids
+    // (the demo's selectable graphs all share the /Demo node set). Close any
+    // in-flight gesture, then drop per-document editor state and the
+    // id-keyed renderer caches: NodeTransformFrame keeps base/offset for a
+    // surviving id and the text/icon caches omit position from their dirty
+    // signatures, so stale slots would keep drawing nodes where the previous
+    // document laid them out while hit-testing runs against the new model.
+    if (s.scrubBegan) {
+      if (s.delegate.endEdit) s.delegate.endEdit();
+      s.scrubBegan = false;
+    }
+    s.drag = Impl::Drag::None;
+    s.dragPreviewActive = false;
+    s.heldPositions.clear();
+    s.autoPositionedNodeIds.clear();
+    if (!s.selectedNodeId.empty()) {
+      s.selectedNodeId.clear();
+      if (s.delegate.selectionChanged) {
+        s.delegate.selectionChanged(std::string());
+      }
+    }
+    s.renderer.transformFrame().reset();
+    s.renderer.textManager().resetPositionCaches();
+    s.renderer.invalidateAll();
+  }
+  s.buildModel();
+  s.requestRender();
 }
 
 std::shared_ptr<GraphDocument> GraphEditor::document() const {
@@ -2073,7 +2190,9 @@ void GraphEditor::Impl::renderGraph() {
   // split regular / relationship (distinct cacheKeys keep their instance VBOs
   // separate). Dimming: 1.0 unselected, 0.3 selected (reference values).
   for (bool drawSelected : {false, true}) {
-    const float dim = drawSelected ? 0.3f : 1.0f;
+    // uDimming scales the shader's distance fade: 0 turns fading off, and a
+    // selection's own noodles fade far less so they survive at the periphery.
+    const float dim = s.linkFading ? (drawSelected ? 0.3f : 1.0f) : 0.0f;
     for (bool relOnly : {false, true}) {
       r.linkManager().renderLinksFromGraph(
           s.model, proj, s.config, zoomF, panXF, panYF, vpWf, vpHf, dim,
@@ -2178,6 +2297,27 @@ void GraphEditor::setOverlayOpacity(float opacity) {
 
 void GraphEditor::setValueScrubEnabled(bool enabled) {
   impl_->valueScrubEnabled = enabled;
+}
+
+void GraphEditor::setLinkFadingEnabled(bool enabled) {
+  if (impl_->linkFading == enabled) return;
+  impl_->linkFading = enabled;
+  impl_->requestRender();
+}
+
+bool GraphEditor::linkFadingEnabled() const { return impl_->linkFading; }
+
+void GraphEditor::setLinkFadeRange(double startFrac, double endFrac) {
+  const auto clampFrac = [](double value) {
+    if (!std::isfinite(value)) return 0.0;
+    return std::max(0.0, std::min(value, 4.0));
+  };
+  double start = clampFrac(startFrac);
+  double end = clampFrac(endFrac);
+  if (end > start) std::swap(start, end);
+  impl_->config.linkEdgeDimmingStart = start;
+  impl_->config.linkEdgeDimmingEnd = end;
+  impl_->requestRender();
 }
 
 void GraphEditor::setDisplayFrame(double frame) {
@@ -2910,6 +3050,102 @@ bool GraphEditor::addNodeAt(const std::string& nodeId, double viewX,
   s.selectNode(nodeId);
   s.requestRender();
   return changed;
+}
+
+bool GraphEditor::createNodeAt(GraphNode node, double viewX, double viewY) {
+  Impl& s = *impl_;
+  if (!s.document || node.id.empty() || s.document->containsNode(node.id)) {
+    return false;
+  }
+  // Center the default pre-layout box under the drop point; the authored
+  // position is the box's top-left, mirroring addNodeAt for a brand-new node.
+  const noodles::Vec2d world = s.viewToGraph(viewX, viewY);
+  constexpr double kDefaultW = 200.0, kDefaultH = 100.0;
+  node.hasPosition = true;
+  node.posX = world[0] - kDefaultW * 0.5;
+  node.posY = world[1] - kDefaultH * 0.5;
+  const std::string nodeId = node.id;
+  const std::string name = node.name.empty() ? nodeId : node.name;
+  const bool changed = s.documentEditBatch(
+      [&] { return s.document->createNode(std::move(node)); },
+      /*topologyEdit=*/true);
+  if (!changed) {
+    s.status("document cannot create " + name);
+    return false;
+  }
+  s.autoPositionedNodeIds.erase(nodeId);
+  s.heldPositions[nodeId] =
+      noodles::Vec2d(world[0] - kDefaultW * 0.5, world[1] - kDefaultH * 0.5);
+  s.buildModel();
+  s.selectNode(nodeId);
+  s.status("added " + name);
+  s.requestRender();
+  return true;
+}
+
+bool GraphEditor::createNodeAutoPlaced(GraphNode node) {
+  Impl& s = *impl_;
+  if (!s.document || node.id.empty() || s.document->containsNode(node.id)) {
+    return false;
+  }
+  // The anchor-less branch of placeIncrementalNodes: a brand-new node has no
+  // placed neighbour yet, so it goes right of the graph's content at its top
+  // edge, then steps below anything it would cover. The resolved position is
+  // authored so the document keeps the node visible (nodes appear when
+  // positioned or connected).
+  constexpr double kDefaultW = 200.0, kDefaultH = 100.0;
+  constexpr double kOverlapGapY = 24.0;
+  double maxRight = 0.0;
+  double minTop = 0.0;
+  bool any = false;
+  for (const auto& [id, n] : s.model.nodes) {
+    const double right = n.position[0] + n.size[0];
+    maxRight = any ? std::max(maxRight, right) : right;
+    minTop = any ? std::min(minTop, n.position[1]) : n.position[1];
+    any = true;
+  }
+  noodles::Vec2d target = any
+      ? noodles::Vec2d(maxRight + kIncrementalGapX, minTop)
+      : noodles::Vec2d(0.0, 0.0);
+  for (int pass = 0; pass < 64; ++pass) {
+    bool moved = false;
+    for (const auto& [id, n] : s.model.nodes) {
+      const bool overlaps = !(target[0] + kDefaultW <= n.position[0] ||
+                              n.position[0] + n.size[0] <= target[0] ||
+                              target[1] + kDefaultH <= n.position[1] ||
+                              n.position[1] + n.size[1] <= target[1]);
+      if (overlaps) {
+        target[1] = n.position[1] + n.size[1] + kOverlapGapY;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  node.hasPosition = true;
+  node.posX = target[0];
+  node.posY = target[1];
+  const std::string nodeId = node.id;
+  const std::string name = node.name.empty() ? nodeId : node.name;
+  const bool changed = s.documentEditBatch(
+      [&] { return s.document->createNode(std::move(node)); },
+      /*topologyEdit=*/true);
+  if (!changed) {
+    s.status("document cannot create " + name);
+    return false;
+  }
+  s.autoPositionedNodeIds.erase(nodeId);
+  s.heldPositions[nodeId] = target;
+  s.buildModel();
+  s.selectNode(nodeId);
+  s.status("added " + name);
+  s.requestRender();
+  return true;
+}
+
+std::vector<std::string> GraphEditor::configurationIssues() const {
+  if (!impl_->document) return {};
+  return ConfigurationIssues(impl_->document->snapshot(impl_->displayFrame));
 }
 
 }  // namespace noodles::demo
