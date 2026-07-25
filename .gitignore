@@ -4,3 +4,4 @@
 *.xcresult
 DerivedData/
 compile_commands.json
+/.omc/

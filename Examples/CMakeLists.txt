@@ -38,6 +38,17 @@ target_include_directories(NoodlesDemoExampleFixture PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(NoodlesDemoExampleFixture PUBLIC NoodlesDemo::Core)
 
+# The hair grooming systems. Deliberately a separate target from Core: the
+# reusable package stays hair-agnostic, and this is an example consumer of it.
+# GL-free, so the CPU test binaries link exactly this code.
+add_library(NoodlesDemoHair STATIC
+  ${NOODLES_DEMO_HAIR_SOURCES}
+  ${NOODLES_DEMO_HAIR_HEADERS})
+target_compile_features(NoodlesDemoHair PUBLIC cxx_std_17)
+target_include_directories(NoodlesDemoHair PUBLIC
+  "${NOODLES_DEMO_HAIR_INCLUDE_DIR}")
+target_link_libraries(NoodlesDemoHair PUBLIC NoodlesDemo::Core)
+
 # Declare assets as bundle resources instead of copying into a guessed bundle
 # layout. CMake then chooses `Contents/Resources` on macOS and the bundle root
 # on iOS, and Xcode's resource phase sees the same files as Ninja/Make builds.
@@ -105,11 +116,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET NoodlesDemoUIKit)
     iPad/main.mm
     iPad/NoodlesDemoViewController.mm
     iPad/NoodlesDemoViewController.h
+    ${NOODLES_DEMO_HAIR_GL_SOURCES}
+    ${NOODLES_DEMO_HAIR_GL_HEADERS}
     "${_noodles_demo_asset_catalog}")
   target_compile_options(NoodlesDemo PRIVATE
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   target_link_libraries(NoodlesDemo PRIVATE
-    NoodlesDemo::UIKit NoodlesDemoExampleFixture
+    NoodlesDemo::UIKit NoodlesDemoExampleFixture NoodlesDemoHair
     "-framework Foundation" "-framework CoreGraphics"
     "-framework ImageIO" "-framework UniformTypeIdentifiers")
   set_target_properties(NoodlesDemo PROPERTIES
@@ -136,11 +149,13 @@ if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND
     macOS/main.mm
     macOS/NoodlesDemoViewController.mm
     macOS/NoodlesDemoViewController.h
+    ${NOODLES_DEMO_HAIR_GL_SOURCES}
+    ${NOODLES_DEMO_HAIR_GL_HEADERS}
     "${_noodles_demo_macos_icon}")
   target_compile_options(NoodlesDemo PRIVATE
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   target_link_libraries(NoodlesDemo PRIVATE
-    NoodlesDemo::AppKit NoodlesDemoExampleFixture
+    NoodlesDemo::AppKit NoodlesDemoExampleFixture NoodlesDemoHair
     "-framework ImageIO" "-framework UniformTypeIdentifiers")
   set_target_properties(NoodlesDemo PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "NoodlesDemo"

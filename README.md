@@ -26,11 +26,73 @@ creates the GL context, translates native events, schedules frames, and can
 optionally forward stylus misses to a background canvas. Without such a target,
 Pencil behaves like touch across the graph surface.
 
+`NoodlesDemoHair` is an example target, not part of the installed package: the
+hair grooming systems are a consumer of Core, deliberately kept outside it so
+the package stays hair-agnostic.
+
 ## Runnable demo surface
 
-The runnable macOS and iPadOS products are both named NoodlesDemo. They render
-the same six-node, topology-driven image pipeline, with every node initially
-visible:
+The runnable macOS and iPadOS products are both named NoodlesDemo. They open on
+**Hair Groom**, a node-driven 3D hair grooming tool, and a switcher in the
+control bar selects it or one of four image-processing documents.
+
+### Hair Groom
+
+A procedural scalp, a seeded guide set, editable gizmos, and an XGen-style
+clump, rendered into the graph view's *own* OpenGL drawable with the
+transparent graph composited on top of them — not a picture of a groom beside
+the graph, but the groom the graph evaluates to.
+
+```text
+Scalp ──┬──▶ Create Guides ──▶ Guide Sculpt ──▶ Clump ──▶ Generate Hair ──▶ Output
+        └───────────────────────────────────────────────▶
+```
+
+Five node-owned tools — Draw Guides, Edit Points, Comb Brush, Edit Clump, and
+Paint Clump — are armed by `tool:*` switches on the nodes that own them, and
+exactly one may be active. Clumping divides the scalp into Voronoi regions,
+converges each region's curves onto their own mean curve, and scales that by a
+weight map you paint directly on the scalp. The Clump node accepts either
+guides or generated curves, so it can sit on either side of Generate Hair, and
+an optional second input lets a separate curve set define the clump centers.
+Evaluation runs from `/Hair/Output` through the connections you actually
+authored, so rewiring the graph rewires the groom and a severed input yields an
+empty result with a status message rather than stale geometry.
+
+See [HAIR_DEMO.md](HAIR_DEMO.md) for the architecture, the full control
+reference, and the manual test sequence.
+
+### Image processing
+
+Four example documents, each rendered by the same shared image processor:
+
+- **Grain Comp** — the six-node contract graph shown below as the everyday
+  finishing comp it implements: generated film grain is graded and merged
+  over the plate through an ellipse matte, with an animated grain grade;
+- **CRT TV** — the classic retro-television effect stack: chromatic color
+  fringing, mixed-in broadcast static, sync jitter, scanlines, and a tube
+  vignette; the static level and fringing are animated, so the frame slider
+  sweeps a clean broadcast into a dying signal;
+- **Kaleidoscope** — the plate folded into mirrored wedges, swirled around
+  the center, posterized into pop-art bands, and tinted; the fold rotation
+  and swirl twist are animated so the frame slider spins the mandala, and a
+  user-picked source image becomes their own kaleidoscope;
+- **Stress Test** — 100+ nodes and noodles placed by the editor's layered
+  auto-layout: eight chains of real image ops (grade, invert, wave, pixelate)
+  merge through a mix tree into the composite, so every node executes per
+  pixel and scrubbing any op visibly changes the render while probing
+  editing, navigation, and rendering throughput at scale.
+
+Each graph keeps its edits while the app runs; switching back restores them.
+The Add Node control offers a palette of executable op types — Grade, Invert,
+Pixelate, Wave, Mix, Noise, Blur, Threshold, Tint, Chroma, Scanlines,
+Vignette, Kaleido, Swirl, Posterize, and Halftone — placed by the editor's
+incremental auto-layout; each has a real exec function in the shared image
+processor, so a new node changes the render as soon as it is wired between an
+image source and Display (Halftone plus Posterize, for example, builds a
+comic-print look from any graph).
+The default Composite document renders the same six-node, topology-driven
+image pipeline as before, with every node initially visible:
 
 [![Watch the NoodlesDemo graph editor demo](media/demo-poster.jpg)](media/demo.mp4)
 

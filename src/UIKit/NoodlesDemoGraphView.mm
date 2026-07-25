@@ -63,6 +63,11 @@ NSString *ToNSString(const std::string &value) {
 
   NSUInteger _pencilPressSequence;
   CGPoint _pencilDownPoint;
+
+  // Gesture ownership, decided at pointer-down and held until pointer-up.
+  BOOL _backgroundOwnsPointer;
+  BOOL _backgroundOwnsPinch;
+  UIHoverGestureRecognizer *_hoverRecognizer;
 }
 
 + (Class)layerClass {
@@ -195,6 +200,14 @@ NSString *ToNSString(const std::string &value) {
       view.onAttributeEdited(identifier, attribute, live ? YES : NO);
     }
   };
+  delegate.configurationError = [weakSelf](const std::string &message) {
+    NSString *text = ToNSString(message);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      NoodlesDemoGraphView *view = weakSelf;
+      if (view.onConfigurationError)
+        view.onConfigurationError(text);
+    });
+  };
   _editor->setDelegate(std::move(delegate));
 }
 
@@ -294,6 +307,11 @@ NSString *ToNSString(const std::string &value) {
     return;
 
   [EAGLContext setCurrentContext:_context];
+  // The host's GL objects were created against this context, so they have to
+  // go before it does — and before the editor's own teardown, mirroring the
+  // order they were created in.
+  if (self.onTeardownBackgroundGL)
+    self.onTeardownBackgroundGL();
   if (_editor && _editorInitialized)
     _editor->cleanupGL();
   if (_framebuffer)
@@ -353,6 +371,13 @@ NSString *ToNSString(const std::string &value) {
   _needsRender = NO;
   [EAGLContext setCurrentContext:_context];
   glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
+  if (self.onRenderBackground) {
+    // The host draws first, into the same drawable; the editor then composites
+    // the graph over it. This ordering is the whole point of the hook, and it
+    // only works when the editor was told to blend rather than overwrite.
+    self.onRenderBackground((CGFloat)_bufferWidth, (CGFloat)_bufferHeight,
+                            self.contentScaleFactor);
+  }
   _editor->renderFrame();
   glBindRenderbuffer(GL_RENDERBUFFER, _colorRenderbuffer);
   [_context presentRenderbuffer:GL_RENDERBUFFER];
@@ -377,6 +402,42 @@ NSString *ToNSString(const std::string &value) {
 - (void)onDisplayLink:(CADisplayLink *)displayLink {
   (void)displayLink;
   [self renderIfNeeded];
+}
+
+#pragma mark - Gesture routing
+
+/// Single decision point for pointer ownership, shared by finger and Pencil.
+/// Graph content always wins; otherwise the host may claim the gesture, and if
+/// it declines the editor keeps its empty-canvas pan.
+- (BOOL)routePointerDown:(CGPoint)point {
+  _backgroundOwnsPointer = NO;
+  if (!self.graphPanLock && self.onBackgroundPointerDown && _editor &&
+      !_editor->hitsGraphElementAt(point.x, point.y)) {
+    _backgroundOwnsPointer =
+        self.onBackgroundPointerDown(point, NoodlesDemoInputModifierNone);
+  }
+  if (!_backgroundOwnsPointer)
+    [self pointerDown:point];
+  return _backgroundOwnsPointer;
+}
+
+- (void)routePointerMove:(CGPoint)point {
+  if (_backgroundOwnsPointer) {
+    if (self.onBackgroundPointerMove)
+      self.onBackgroundPointerMove(point, NoodlesDemoInputModifierNone);
+    return;
+  }
+  [self pointerMove:point];
+}
+
+- (void)routePointerUp:(CGPoint)point {
+  if (_backgroundOwnsPointer) {
+    if (self.onBackgroundPointerUp)
+      self.onBackgroundPointerUp(point, NoodlesDemoInputModifierNone);
+    _backgroundOwnsPointer = NO;
+    return;
+  }
+  [self pointerUp:point];
 }
 
 #pragma mark - Finger gestures
@@ -406,6 +467,14 @@ NSString *ToNSString(const std::string &value) {
   tap.allowedTouchTypes = directOnly;
   tap.delegate = self;
   [self addGestureRecognizer:tap];
+
+  // Pencil hover, where the hardware reports it. Harmless elsewhere: the
+  // recognizer simply never fires.
+  _hoverRecognizer =
+      [[UIHoverGestureRecognizer alloc] initWithTarget:self
+                                                action:@selector(handleHover:)];
+  _hoverRecognizer.delegate = self;
+  [self addGestureRecognizer:_hoverRecognizer];
 
   UILongPressGestureRecognizer *longPress =
       [[UILongPressGestureRecognizer alloc]
@@ -443,13 +512,13 @@ NSString *ToNSString(const std::string &value) {
     // Recognition begins after UIKit's movement threshold. Reconstruct the
     // original down point so tiny ports and link bands retain their hit target.
     const CGPoint translation = [gesture translationInView:self];
-    [self pointerDown:CGPointMake(point.x - translation.x,
-                                  point.y - translation.y)];
+    [self routePointerDown:CGPointMake(point.x - translation.x,
+                                       point.y - translation.y)];
     break;
   }
   case UIGestureRecognizerStateChanged:
     if (_panOwnsEditor)
-      [self pointerMove:point];
+      [self routePointerMove:point];
     break;
   case UIGestureRecognizerStateEnded:
   case UIGestureRecognizerStateCancelled:
@@ -457,7 +526,7 @@ NSString *ToNSString(const std::string &value) {
     if (!_panOwnsEditor)
       return;
     _panOwnsEditor = NO;
-    [self pointerUp:point];
+    [self routePointerUp:point];
     [self stopFingerDisplayLinkIfIdle];
     break;
   default:
@@ -473,11 +542,24 @@ NSString *ToNSString(const std::string &value) {
       return;
     _pinchOwnsEditor = YES;
     [self startGestureDisplayLink];
-    [self pinchBegin];
+    // Same rule as the pointer stream: ownership is settled from where the
+    // gesture started and is not revisited.
+    _backgroundOwnsPinch = !self.graphPanLock && self.onBackgroundZoomBegin &&
+                           _editor &&
+                           !_editor->hitsGraphElementAt(anchor.x, anchor.y) &&
+                           self.onBackgroundZoomBegin(anchor);
+    if (!_backgroundOwnsPinch)
+      [self pinchBegin];
     break;
   case UIGestureRecognizerStateChanged:
-    if (_pinchOwnsEditor)
+    if (!_pinchOwnsEditor)
+      break;
+    if (_backgroundOwnsPinch) {
+      if (self.onBackgroundZoomUpdate)
+        self.onBackgroundZoomUpdate(gesture.scale);
+    } else {
       [self pinchUpdate:gesture.scale anchor:anchor];
+    }
     break;
   case UIGestureRecognizerStateEnded:
   case UIGestureRecognizerStateCancelled:
@@ -485,7 +567,13 @@ NSString *ToNSString(const std::string &value) {
     if (!_pinchOwnsEditor)
       return;
     _pinchOwnsEditor = NO;
-    [self pinchEnd];
+    if (_backgroundOwnsPinch) {
+      if (self.onBackgroundZoomEnd)
+        self.onBackgroundZoomEnd();
+      _backgroundOwnsPinch = NO;
+    } else {
+      [self pinchEnd];
+    }
     [self stopFingerDisplayLinkIfIdle];
     break;
   default:
@@ -508,8 +596,23 @@ NSString *ToNSString(const std::string &value) {
     return;
   }
   const CGPoint point = [gesture locationInView:self];
-  [self pointerDown:point];
-  [self pointerUp:point];
+  [self routePointerDown:point];
+  [self routePointerUp:point];
+}
+
+- (void)handleHover:(UIHoverGestureRecognizer *)gesture {
+  if (!self.onBackgroundHover || self.graphPanLock || _panOwnsEditor ||
+      _pinchOwnsEditor || _pencilGraphActive) {
+    return;
+  }
+  if (gesture.state != UIGestureRecognizerStateBegan &&
+      gesture.state != UIGestureRecognizerStateChanged) {
+    return;
+  }
+  const CGPoint point = [gesture locationInView:self];
+  if (_editor && _editor->hitsGraphElementAt(point.x, point.y))
+    return;
+  self.onBackgroundHover(point, NoodlesDemoInputModifierNone);
 }
 
 - (void)stopFingerDisplayLinkIfIdle {
@@ -569,7 +672,7 @@ NSString *ToNSString(const std::string &value) {
   // live=false attribute callback and end-edit bracket), so merely dropping the
   // UITouch would leave the edit envelope active.
   if (_pencilGraphActive) {
-    [self pointerUp:_graphPencilLastPoint];
+    [self routePointerUp:_graphPencilLastPoint];
     [self endGraphPencil];
   }
 }
@@ -599,7 +702,7 @@ NSString *ToNSString(const std::string &value) {
       _pencilGraphActive = YES;
       _graphPencilLastPoint = point;
       [self startGestureDisplayLink];
-      [self pointerDown:point];
+      [self routePointerDown:point];
 
       _pencilDownPoint = point;
       const NSUInteger sequence = ++_pencilPressSequence;
@@ -610,7 +713,10 @@ NSString *ToNSString(const std::string &value) {
             NoodlesDemoGraphView *view = weakSelf;
             if (!view || !view->_editor ||
                 sequence != view->_pencilPressSequence ||
-                !view->_pencilGraphActive) {
+                !view->_pencilGraphActive ||
+                view->_backgroundOwnsPointer) {
+              // A background-owned Pencil stroke belongs to the host's tool
+              // for its whole lifetime; it must never also remove a node.
               return;
             }
             UITouch *activeTouch = view->_graphPencilTouch;
@@ -653,7 +759,7 @@ NSString *ToNSString(const std::string &value) {
     if (touch == _graphPencilTouch) {
       const CGPoint point = [touch locationInView:self];
       _graphPencilLastPoint = point;
-      [self pointerMove:point];
+      [self routePointerMove:point];
     } else {
       if (!forwardedPencilTouches)
         forwardedPencilTouches = [NSMutableSet set];
@@ -675,7 +781,7 @@ NSString *ToNSString(const std::string &value) {
     if (touch == _graphPencilTouch) {
       const CGPoint point = [touch locationInView:self];
       _graphPencilLastPoint = point;
-      [self pointerUp:point];
+      [self routePointerUp:point];
       [self endGraphPencil];
     } else {
       if (!forwardedPencilTouches)
@@ -701,10 +807,12 @@ NSString *ToNSString(const std::string &value) {
       continue;
     if (touch == _graphPencilTouch) {
       // GraphEditor has no separate cancel operation. Finish the matched
-      // pointer stream at its last location so no drag remains active.
+      // pointer stream at its last location so no drag remains active. The
+      // same applies to a host-owned stream, whose tool would otherwise stay
+      // mid-stroke.
       const CGPoint point = [touch locationInView:self];
       _graphPencilLastPoint = point;
-      [self pointerUp:point];
+      [self routePointerUp:point];
       [self endGraphPencil];
     } else {
       if (!forwardedPencilTouches)
@@ -793,6 +901,11 @@ NSString *ToNSString(const std::string &value) {
 - (void)setValueScrubEnabled:(BOOL)enabled {
   if (_editor)
     _editor->setValueScrubEnabled(enabled == YES);
+}
+
+- (void)setLinkFadingEnabled:(BOOL)enabled {
+  if (_editor)
+    _editor->setLinkFadingEnabled(enabled == YES);
 }
 
 - (void)setDisplayFrame:(double)frame {

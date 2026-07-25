@@ -6,12 +6,54 @@
 #include "../AppleDemoImageLoader.h"
 #include "../DemoGraphFixture.h"
 #include "../DemoImageProcessor.h"
+#include "HairGLRenderer.h"
+#include "HairGraph.h"
+#include "HairScene.h"
 
 #include <noodles/demo/GraphEditor.h>
 #include <noodles/demo/InMemoryGraphDocument.h>
 
+#include <array>
 #include <memory>
+#include <string>
 #include <utility>
+
+namespace hair = noodles::demo::hair;
+
+namespace {
+
+// Control-bar order. Index 0 is the groom, which is what the app opens on;
+// the image-processing graphs keep their original order after it.
+constexpr NSInteger kHairSegment = 0;
+
+const char *kToolTitles[] = {"No Tool", "Draw",  "Edit Pts",
+                            "Comb",    "Clump", "Paint"};
+constexpr int kToolCount = 6;
+
+hair::HairToolKind ToolForSegment(NSInteger segment) {
+  switch (segment) {
+    case 1: return hair::HairToolKind::DrawGuides;
+    case 2: return hair::HairToolKind::EditPoints;
+    case 3: return hair::HairToolKind::CombBrush;
+    case 4: return hair::HairToolKind::EditClump;
+    case 5: return hair::HairToolKind::PaintClump;
+    default: return hair::HairToolKind::None;
+  }
+}
+
+NSInteger SegmentForTool(hair::HairToolKind kind) {
+  switch (kind) {
+    case hair::HairToolKind::DrawGuides: return 1;
+    case hair::HairToolKind::EditPoints: return 2;
+    case hair::HairToolKind::CombBrush: return 3;
+    case hair::HairToolKind::EditClump: return 4;
+    case hair::HairToolKind::PaintClump: return 5;
+    case hair::HairToolKind::None: break;
+  }
+  return 0;
+}
+
+}  // namespace
 
 namespace {
 
@@ -68,21 +110,44 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
 - (void)refreshOutputImageLive:(BOOL)live;
 - (void)presentSourceImagePicker;
 - (void)loadSourceImageAtURL:(NSURL *)url;
+- (void)showErrorToast:(NSString *)message;
+- (void)setHairModeEnabled:(BOOL)enabled;
+- (void)syncToolPicker;
+- (void)addHairNodeOfKind:(NSInteger)kindIndex;
 @end
 
 @implementation NoodlesDemoViewController {
   NSString *_assetsPath;
   noodles::demo::examples::DemoGraphFixture _fixture;
+  std::array<std::shared_ptr<noodles::demo::InMemoryGraphDocument>,
+             noodles::demo::examples::kDemoGraphVariantCount>
+      _documents;
+  NSInteger _activeVariant;
   NSImageView *_outputView;
   NoodlesDemoGraphView *_graphView;
   NSTextField *_statusLabel;
   NSTextField *_selectionLabel;
   NSTextField *_opacityLabel;
   NSTextField *_frameLabel;
+  NSTextField *_toastLabel;
+  NSUInteger _toastGeneration;
   double _displayFrame;
   BOOL _didFrameGraph;
   noodles::demo::examples::DemoRgbaImage _sourceImage;
+  NSString *_sourceImagePath;
   NSUInteger _sourceLoadGeneration;
+
+  // Hair grooming demo. The scene is platform neutral and shared verbatim
+  // with the iPad app; only the event translation below is AppKit specific.
+  std::shared_ptr<noodles::demo::InMemoryGraphDocument> _hairDocument;
+  std::unique_ptr<hair::HairScene> _hairScene;
+  std::unique_ptr<hair::HairGLRenderer> _hairRenderer;
+  BOOL _hairMode;
+  // The viewport tools live in their own side panel, shown only while the
+  // groom is up: they act on the 3D scene, not on the graph, so they do not
+  // belong in the graph control bar.
+  NSView *_toolPanel;
+  NSMutableArray<NSButton *> *_toolButtons;
 }
 
 - (instancetype)initWithAssetsPath:(NSString *)assetsPath {
@@ -99,7 +164,14 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
   self.view = container;
 
   _fixture = noodles::demo::examples::CreateDemoGraphFixture();
+  _documents[0] = _fixture.document;
+  _activeVariant = kHairSegment;
   _displayFrame = 12.0;
+
+  // The groom the app opens on: six connected /Hair nodes, a procedural
+  // scalp, and a deterministic seeded guide set.
+  _hairDocument = hair::CreateHairGraphDocument();
+  _hairScene = std::make_unique<hair::HairScene>(_hairDocument);
   _outputView = [[NSImageView alloc] initWithFrame:container.bounds];
   _outputView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   _outputView.imageAlignment = NSImageAlignCenter;
@@ -146,13 +218,75 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
   fitGraph.bezelStyle = NSBezelStyleRounded;
   fitGraph.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold];
 
-  NSStackView *controlRow = [NSStackView
-      stackViewWithViews:@[ _opacityLabel, opacitySlider, _frameLabel, frameSlider, fitGraph ]];
+  NSButton *addNode = [NSButton buttonWithTitle:@"+ Node"
+                                         target:self
+                                         action:@selector(addDemoNode:)];
+  addNode.bezelStyle = NSBezelStyleRounded;
+  addNode.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold];
+
+  NSMutableArray<NSString *> *graphTitles = [NSMutableArray arrayWithObject:@"Hair Groom"];
+  for (int variant = 0; variant < noodles::demo::examples::kDemoGraphVariantCount; ++variant) {
+    [graphTitles addObject:@(noodles::demo::examples::DemoGraphVariantTitle(
+                     static_cast<noodles::demo::examples::DemoGraphVariant>(variant)))];
+  }
+  NSSegmentedControl *graphPicker =
+      [NSSegmentedControl segmentedControlWithLabels:graphTitles
+                                        trackingMode:NSSegmentSwitchTrackingSelectOne
+                                              target:self
+                                              action:@selector(graphChanged:)];
+  graphPicker.selectedSegment = kHairSegment;
+  graphPicker.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium];
+
+  NSStackView *controlRow = [NSStackView stackViewWithViews:@[
+    graphPicker, _opacityLabel, opacitySlider, _frameLabel, frameSlider,
+    fitGraph, addNode
+  ]];
   controlRow.translatesAutoresizingMaskIntoConstraints = NO;
   controlRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
   controlRow.alignment = NSLayoutAttributeCenterY;
   controlRow.spacing = 10.0;
   [controls addSubview:controlRow];
+
+  // ── viewport tool panel ──
+  _toolPanel = [[NSView alloc] initWithFrame:NSZeroRect];
+  _toolPanel.translatesAutoresizingMaskIntoConstraints = NO;
+  _toolPanel.wantsLayer = YES;
+  _toolPanel.layer.backgroundColor = [NSColor colorWithWhite:0.04 alpha:0.82].CGColor;
+  _toolPanel.layer.cornerRadius = 10.0;
+  [container addSubview:_toolPanel];
+
+  NSTextField *toolHeading = ControlLabel(@"Viewport");
+  toolHeading.font = [NSFont systemFontOfSize:11.0 weight:NSFontWeightSemibold];
+  toolHeading.textColor = NSColor.secondaryLabelColor;
+
+  _toolButtons = [NSMutableArray array];
+  NSMutableArray<NSView *> *panelViews = [NSMutableArray arrayWithObject:toolHeading];
+  for (int tool = 0; tool < kToolCount; ++tool) {
+    NSButton *button = [NSButton buttonWithTitle:@(kToolTitles[tool])
+                                          target:self
+                                          action:@selector(toolButtonPressed:)];
+    // Push-on/push-off gives the armed tool a native filled appearance, so the
+    // panel reads its state from the nodes rather than inventing a highlight.
+    [button setButtonType:NSButtonTypePushOnPushOff];
+    button.bezelStyle = NSBezelStyleRounded;
+    button.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightMedium];
+    button.tag = tool;
+    [_toolButtons addObject:button];
+    [panelViews addObject:button];
+  }
+
+  NSStackView *toolColumn = [NSStackView stackViewWithViews:panelViews];
+  toolColumn.translatesAutoresizingMaskIntoConstraints = NO;
+  toolColumn.orientation = NSUserInterfaceLayoutOrientationVertical;
+  toolColumn.alignment = NSLayoutAttributeLeading;
+  toolColumn.spacing = 6.0;
+  [_toolPanel addSubview:toolColumn];
+
+  _toastLabel = HudLabel(@"");
+  _toastLabel.layer.backgroundColor =
+      [NSColor colorWithSRGBRed:0.55 green:0.10 blue:0.12 alpha:0.92].CGColor;
+  _toastLabel.hidden = YES;
+  [container addSubview:_toastLabel];
 
   [NSLayoutConstraint activateConstraints:@[
     [_statusLabel.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-12.0],
@@ -181,6 +315,21 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
     [frameSlider.widthAnchor constraintEqualToConstant:150.0],
     [fitGraph.widthAnchor constraintEqualToConstant:54.0],
     [fitGraph.heightAnchor constraintEqualToConstant:28.0],
+    [addNode.widthAnchor constraintEqualToConstant:72.0],
+    [addNode.heightAnchor constraintEqualToConstant:28.0],
+    [_toolPanel.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:12.0],
+    [_toolPanel.centerYAnchor constraintEqualToAnchor:container.centerYAnchor],
+    [toolColumn.topAnchor constraintEqualToAnchor:_toolPanel.topAnchor constant:10.0],
+    [toolColumn.bottomAnchor constraintEqualToAnchor:_toolPanel.bottomAnchor constant:-10.0],
+    [toolColumn.leadingAnchor constraintEqualToAnchor:_toolPanel.leadingAnchor constant:10.0],
+    [toolColumn.trailingAnchor constraintEqualToAnchor:_toolPanel.trailingAnchor constant:-10.0],
+    [_toastLabel.topAnchor constraintEqualToAnchor:controls.bottomAnchor constant:10.0],
+    [_toastLabel.centerXAnchor constraintEqualToAnchor:container.centerXAnchor],
+    [_toastLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:container.leadingAnchor
+                                                            constant:12.0],
+    [_toastLabel.trailingAnchor constraintLessThanOrEqualToAnchor:container.trailingAnchor
+                                                         constant:-12.0],
+    [_toastLabel.heightAnchor constraintEqualToConstant:30.0],
   ]];
 
   __weak NoodlesDemoViewController *weakSelf = self;
@@ -203,23 +352,342 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
     }
   };
   _graphView.onAttributeEdited = ^(NSString *nodeId, NSString *attributeName, BOOL live) {
-    (void)nodeId;
-    (void)attributeName;
     NoodlesDemoViewController *controller = weakSelf;
-    if (controller) [controller refreshOutputImageLive:live];
+    if (!controller) return;
+    if (controller->_hairMode) {
+      // Value edits authored in the graph feed straight back into the groom,
+      // including the tool: switches, whose exclusivity the scene enforces.
+      controller->_hairScene->onAttributeEdited(nodeId.UTF8String,
+                                                attributeName.UTF8String);
+      [controller syncToolPicker];
+      [controller->_graphView setNeedsRender];
+      return;
+    }
+    [controller refreshOutputImageLive:live];
   };
   _graphView.onTopologyEdited = ^{
     NoodlesDemoViewController *controller = weakSelf;
-    if (controller) [controller refreshOutputImage];
+    if (!controller) return;
+    if (controller->_hairMode) {
+      controller->_hairScene->onTopologyEdited();
+      [controller->_graphView setNeedsRender];
+      controller->_statusLabel.stringValue =
+          @(controller->_hairScene->result().status.empty()
+                ? "Groom rewired"
+                : controller->_hairScene->result().status.c_str());
+      return;
+    }
+    [controller refreshOutputImage];
   };
   _graphView.onGraphStructureChanged = ^{
     NoodlesDemoViewController *controller = weakSelf;
-    if (controller) [controller refreshOutputImage];
+    if (!controller) return;
+    // An external document topology change must restructure the editor's
+    // graph, not just the rendered output (the shell schedules the refresh on
+    // its serialized render thread through reloadGraph).
+    [controller->_graphView reloadGraph];
+    [controller refreshOutputImage];
   };
+  _graphView.onConfigurationError = ^(NSString *message) {
+    NoodlesDemoViewController *controller = weakSelf;
+    if (controller) [controller showErrorToast:message];
+  };
+
+  // ── 3D viewport hooks ──
+  //
+  // The groom is drawn into the graph view's own drawable, immediately before
+  // the editor composites the transparent graph over it. Everything below is
+  // event translation; the decisions all live in the shared C++ scene.
+  _graphView.onRenderBackground = ^(CGFloat width, CGFloat height, CGFloat scale) {
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || !controller->_hairMode) return;
+    if (!controller->_hairRenderer) {
+      controller->_hairRenderer = std::make_unique<hair::HairGLRenderer>();
+      if (!controller->_hairRenderer->initialize()) {
+        NSString *message = @(controller->_hairRenderer->lastError().c_str());
+        dispatch_async(dispatch_get_main_queue(), ^{
+          NoodlesDemoViewController *inner = weakSelf;
+          if (inner) inner->_statusLabel.stringValue = message;
+        });
+        return;
+      }
+    }
+    controller->_hairRenderer->render(*controller->_hairScene, (int)width,
+                                      (int)height, (float)scale);
+  };
+  _graphView.onTeardownBackgroundGL = ^{
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || !controller->_hairRenderer) return;
+    controller->_hairRenderer->shutdown();
+    controller->_hairRenderer.reset();
+  };
+  _graphView.onBackgroundPointerDown = ^BOOL(CGPoint point,
+                                             NoodlesDemoInputModifiers modifiers) {
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || !controller->_hairMode) return NO;
+    const bool claimed = controller->_hairScene->pointerDown(
+        (float)point.x, (float)point.y,
+        (modifiers & NoodlesDemoInputModifierPrimary) != 0);
+    [controller->_graphView setNeedsRender];
+    return claimed ? YES : NO;
+  };
+  _graphView.onBackgroundPointerMove = ^(CGPoint point,
+                                         NoodlesDemoInputModifiers modifiers) {
+    (void)modifiers;
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || !controller->_hairMode) return;
+    controller->_hairScene->pointerMove((float)point.x, (float)point.y);
+    controller->_statusLabel.stringValue =
+        @(controller->_hairScene->status().c_str());
+    [controller->_graphView setNeedsRender];
+  };
+  _graphView.onBackgroundPointerUp = ^(CGPoint point,
+                                       NoodlesDemoInputModifiers modifiers) {
+    (void)modifiers;
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || !controller->_hairMode) return;
+    controller->_hairScene->pointerUp((float)point.x, (float)point.y);
+    controller->_statusLabel.stringValue =
+        @(controller->_hairScene->status().c_str());
+    [controller->_graphView setNeedsRender];
+  };
+  _graphView.onBackgroundHover = ^(CGPoint point,
+                                   NoodlesDemoInputModifiers modifiers) {
+    (void)modifiers;
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || !controller->_hairMode) return;
+    controller->_hairScene->hoverMove((float)point.x, (float)point.y);
+    [controller->_graphView setNeedsRender];
+  };
+  _graphView.onBackgroundZoomBegin = ^BOOL(CGPoint anchor) {
+    (void)anchor;
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || !controller->_hairMode) return NO;
+    controller->_hairScene->pinchBegin();
+    return YES;
+  };
+  _graphView.onBackgroundZoomUpdate = ^(CGFloat scale) {
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || !controller->_hairMode) return;
+    controller->_hairScene->pinchUpdate((float)scale);
+    [controller->_graphView setNeedsRender];
+  };
+  _graphView.onBackgroundZoomEnd = ^{
+    NoodlesDemoViewController *controller = weakSelf;
+    if (controller && controller->_hairMode) controller->_hairScene->pinchEnd();
+  };
+
+  [self setHairModeEnabled:YES];
   [self refreshOutputImage];
 }
 
+#pragma mark - Hair grooming mode
+
+- (void)setHairModeEnabled:(BOOL)enabled {
+  _hairMode = enabled;
+  _outputView.hidden = enabled;
+  _toolPanel.hidden = !enabled;
+
+  if (enabled) {
+    _fixture.document = _hairDocument;
+    _fixture.editor->setDocument(_hairDocument);
+    // Without this the editor's composite pass would overwrite every pixel the
+    // groom just drew into the shared drawable.
+    _fixture.editor->setOverlayBlendsWithBackground(true);
+    // Frame the whole groom, guide tips included, rather than trusting the
+    // camera defaults to suit whatever the Scalp node is currently set to.
+    _hairScene->frameGroom();
+  } else {
+    _fixture.editor->setOverlayBlendsWithBackground(false);
+  }
+  [_graphView reloadGraph];
+  _didFrameGraph = [_graphView frameAllWithPadding:32.0];
+  [self syncToolPicker];
+  [_graphView setNeedsRender];
+}
+
+- (void)syncToolPicker {
+  if (!_hairScene) return;
+  const NSInteger active = SegmentForTool(_hairScene->activeTool());
+  for (NSButton *button in _toolButtons) {
+    button.state = button.tag == active ? NSControlStateValueOn
+                                        : NSControlStateValueOff;
+  }
+}
+
+- (void)toolButtonPressed:(NSButton *)sender {
+  if (!_hairMode || !_hairScene) {
+    [self syncToolPicker];
+    return;
+  }
+  _hairScene->setActiveTool(ToolForSegment(sender.tag));
+  // Re-read from the nodes rather than trusting the click: the scene may have
+  // chosen a different node, or declined the tool entirely.
+  [self syncToolPicker];
+  _statusLabel.stringValue = @(_hairScene->status().c_str());
+  [_graphView setNeedsRender];
+}
+
+- (void)showErrorToast:(NSString *)message {
+  const NSUInteger generation = ++_toastGeneration;
+  _toastLabel.stringValue = message.length > 0 ? message : @"Invalid graph";
+  _toastLabel.hidden = NO;
+  _toastLabel.alphaValue = 1.0;
+  __weak NoodlesDemoViewController *weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.4 * NSEC_PER_SEC)),
+                 dispatch_get_main_queue(), ^{
+    NoodlesDemoViewController *controller = weakSelf;
+    if (!controller || generation != controller->_toastGeneration) return;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+      context.duration = 0.3;
+      controller->_toastLabel.animator.alphaValue = 0.0;
+    } completionHandler:^{
+      NoodlesDemoViewController *inner = weakSelf;
+      if (!inner || generation != inner->_toastGeneration) return;
+      inner->_toastLabel.hidden = YES;
+      inner->_toastLabel.alphaValue = 1.0;
+    }];
+  });
+}
+
+- (void)addDemoNode:(NSButton *)sender {
+  namespace demo = noodles::demo::examples;
+  NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Add Node"];
+  // The palette follows the active graph: /Hair node types while the groom is
+  // up, image ops otherwise. Offering image ops to a groom would list nodes
+  // that can never be wired into it.
+  if (_hairMode) {
+    for (int kind = 0; kind < hair::kHairNodeKindCount; ++kind) {
+      NSMenuItem *item = [[NSMenuItem alloc]
+          initWithTitle:@(hair::HairNodeKindTitle(
+                            static_cast<hair::HairNodeKind>(kind)))
+                 action:@selector(addNodeKindChosen:)
+          keyEquivalent:@""];
+      item.target = self;
+      item.tag = kind;
+      [menu addItem:item];
+    }
+  } else {
+    for (int kind = 0; kind < demo::kDemoOpKindCount; ++kind) {
+      NSMenuItem *item = [[NSMenuItem alloc]
+          initWithTitle:@(demo::DemoOpKindTitle(static_cast<demo::DemoOpKind>(kind)))
+                 action:@selector(addNodeKindChosen:)
+          keyEquivalent:@""];
+      item.target = self;
+      item.tag = kind;
+      [menu addItem:item];
+    }
+  }
+  [menu popUpMenuPositioningItem:nil
+                      atLocation:NSMakePoint(0.0, NSHeight(sender.bounds))
+                          inView:sender];
+}
+
+- (void)addNodeKindChosen:(NSMenuItem *)item {
+  if (_hairMode) {
+    [self addHairNodeOfKind:item.tag];
+    return;
+  }
+  [self addDemoNodeOfKind:item.tag];
+}
+
+- (void)addHairNodeOfKind:(NSInteger)kindIndex {
+  if (!_fixture.editor || !_hairDocument) return;
+  if (kindIndex < 0 || kindIndex >= hair::kHairNodeKindCount) return;
+  const auto kind = static_cast<hair::HairNodeKind>(kindIndex);
+  const std::string title = hair::HairNodeKindTitle(kind);
+  std::string bare;
+  for (const char character : title) {
+    if (character != ' ') bare.push_back(character);
+  }
+  int index = 1;
+  std::string nodeId = "/Hair/" + bare + "1";
+  while (_hairDocument->containsNode(nodeId)) {
+    ++index;
+    nodeId = "/Hair/" + bare + std::to_string(index);
+  }
+  noodles::demo::GraphNode node =
+      hair::MakeHairNode(kind, nodeId, title + " " + std::to_string(index));
+  if (!_fixture.editor->createNodeAutoPlaced(std::move(node))) {
+    _statusLabel.stringValue = @"Could not add a node";
+    return;
+  }
+  _hairScene->onTopologyEdited();
+  [_graphView setNeedsRender];
+  _statusLabel.stringValue = [NSString
+      stringWithFormat:@"Added %s — wire it in to change the groom", title.c_str()];
+}
+
+- (void)addDemoNodeOfKind:(NSInteger)kindIndex {
+  namespace demo = noodles::demo::examples;
+  if (!_fixture.editor || !_fixture.document) return;
+  if (kindIndex < 0 || kindIndex >= demo::kDemoOpKindCount) return;
+  const auto kind = static_cast<demo::DemoOpKind>(kindIndex);
+  const std::string title = demo::DemoOpKindTitle(kind);
+  int index = 1;
+  std::string nodeId = "/Demo/" + title + "1";
+  while (_fixture.document->containsNode(nodeId)) {
+    ++index;
+    nodeId = "/Demo/" + title + std::to_string(index);
+  }
+  noodles::demo::GraphNode node = demo::MakeDemoOpNode(
+      kind, nodeId, title + " " + std::to_string(index));
+  if (!_fixture.editor->createNodeAutoPlaced(std::move(node))) {
+    _statusLabel.stringValue = @"Could not add a node";
+  }
+}
+
+- (void)graphChanged:(NSSegmentedControl *)sender {
+  [self activateGraphVariant:sender.selectedSegment];
+}
+
+- (void)activateGraphVariant:(NSInteger)segment {
+  namespace demo = noodles::demo::examples;
+  if (segment == _activeVariant) return;
+
+  if (segment == kHairSegment) {
+    _activeVariant = segment;
+    [self setHairModeEnabled:YES];
+    _statusLabel.stringValue = @"Graph: Hair Groom";
+    _selectionLabel.stringValue = @"No selection";
+    return;
+  }
+
+  const NSInteger index = segment - 1;
+  if (index < 0 || index >= demo::kDemoGraphVariantCount) return;
+  const auto variant = static_cast<demo::DemoGraphVariant>(index);
+  auto &document = _documents[static_cast<std::size_t>(index)];
+  if (!document) {
+    document = demo::CreateDemoGraphDocument(variant);
+    // A lazily built graph adopts the already-chosen source image so its
+    // Source Image row matches what RenderDemoImage will show.
+    if (_sourceImagePath.length > 0) {
+      document->setStringAttributeValue("/Demo/SourceImage", "path",
+                                        _sourceImagePath.UTF8String,
+                                        _displayFrame);
+    }
+  }
+  _activeVariant = segment;
+  _hairMode = NO;
+  _outputView.hidden = NO;
+  _toolPanel.hidden = YES;
+  // Back to the image demos: the graph owns the whole surface again, so the
+  // cheaper unblended composite is correct.
+  _fixture.editor->setOverlayBlendsWithBackground(false);
+  _fixture.document = document;
+  _fixture.editor->setDocument(document);
+  [_graphView reloadGraph];
+  _didFrameGraph = [_graphView frameAllWithPadding:32.0];
+  [self refreshOutputImage];
+  _statusLabel.stringValue =
+      [NSString stringWithFormat:@"Graph: %s", demo::DemoGraphVariantTitle(variant)];
+  _selectionLabel.stringValue = @"No selection";
+}
+
 - (void)refreshOutputImageLive:(BOOL)live {
+  // The groom renders itself into the GL drawable; there is no 2D image to
+  // recompute for it.
+  if (_hairMode) return;
   if (!_fixture.document || !_outputView) return;
   const noodles::demo::GraphSnapshot snapshot = _fixture.document->snapshot(_displayFrame);
   const noodles::demo::examples::DemoRgbaImage *source =
@@ -295,9 +763,16 @@ NSImage *ImageFromRgba(const noodles::demo::examples::DemoRgbaImage &image) {
         return;
       }
       controller->_sourceImage = std::move(*decoded);
+      controller->_sourceImagePath = path;
       const char *utf8Path = path.UTF8String;
-      controller->_fixture.document->setStringAttributeValue(
-          "/Demo/SourceImage", "path", utf8Path ? utf8Path : "", controller->_displayFrame);
+      // The decoded image feeds every graph's renderer, so author the path
+      // into each already-built document, not only the visible one.
+      for (const auto &document : controller->_documents) {
+        if (!document) continue;
+        document->setStringAttributeValue(
+            "/Demo/SourceImage", "path", utf8Path ? utf8Path : "",
+            controller->_displayFrame);
+      }
       [controller refreshOutputImage];
       controller->_statusLabel.stringValue =
           [NSString stringWithFormat:@"Source image: %@", path.lastPathComponent];

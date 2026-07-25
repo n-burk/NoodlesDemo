@@ -1624,6 +1624,161 @@ bool TestAddPrimNodeAt() {
   return true;
 }
 
+// createNodeAt authors a brand-new document node centered under the drop
+// point, selects it, and fires ONE topology-edit envelope.
+bool TestCreateNodeAt() {
+  auto stage = NewDocument({Node("/New/Seed", true, 40.0, 40.0)});
+  ig::NoodlesGraphView view;
+  int beginCount = 0, endCount = 0, topologyCount = 0;
+  ig::GraphEditDelegate del;
+  del.beginEdit = [&] { ++beginCount; };
+  del.endEdit = [&] { ++endCount; };
+  del.topologyEdited = [&] { ++topologyCount; };
+  view.setDelegate(del);
+  view.setDocument(stage);
+  INK_CHECK(view.nodeCount() == 1);
+
+  ig::GraphNode fresh;
+  fresh.id = "/New/Created";
+  fresh.name = "Created";
+  fresh.properties.push_back(Numeric("in"));
+  INK_CHECK(view.createNodeAt(fresh, 400.0, 300.0));
+  INK_CHECK(stage->containsNode("/New/Created"));
+  INK_CHECK(view.nodeCount() == 2);
+  INK_CHECK(view.selectedNodeId() == "/New/Created");
+  INK_CHECK(beginCount == 1 && endCount == 1 && topologyCount == 1);
+  double x = 0, y = 0;
+  INK_CHECK(view.nodePosition("/New/Created", &x, &y));
+  // Centered under the drop point using the pre-layout default box (200×100).
+  INK_CHECK(x == 300.0 && y == 250.0);
+
+  // A duplicate id is rejected without another envelope or document change.
+  INK_CHECK(!view.createNodeAt(fresh, 100.0, 100.0));
+  INK_CHECK(beginCount == 1 && topologyCount == 1);
+  INK_CHECK(view.nodeCount() == 2);
+
+  // Round-trips: the created node carries its authored position.
+  ig::NoodlesGraphView view2;
+  view2.setDocument(stage);
+  INK_CHECK(view2.nodeCount() == 2);
+  INK_CHECK(view2.nodePosition("/New/Created", &x, &y));
+  INK_CHECK(x == 300.0 && y == 250.0);
+  std::printf("  createNodeAt authors and places a new node ok\n");
+  return true;
+}
+
+// A row-edge band drag that closes a feedback loop is STILL authored, and the
+// editor reports the invalid configuration through configurationError.
+bool TestConfigurationErrorStillConnects() {
+  // A.in ← B.out already flows B → A; authoring B.in ← A.out closes the loop.
+  auto stage = NewDocument(
+      {Node("/C/A", true, 0.0, 0.0), Node("/C/B", true, 700.0, 0.0)});
+  stage->addProperty("/C/A", Numeric("in"));
+  stage->addProperty("/C/A", Numeric("out", "float", 1.0));
+  stage->addProperty("/C/B", Numeric("in"));
+  stage->addProperty("/C/B", Numeric("out", "float", 2.0));
+  stage->authorConnection("/C/A", "in", "/C/B", "out");
+
+  ig::NoodlesGraphView view;
+  std::vector<std::string> errors;
+  ig::GraphEditDelegate del;
+  del.configurationError = [&](const std::string& m) { errors.push_back(m); };
+  view.setDelegate(del);
+  view.setDocument(stage);
+  INK_CHECK(view.configurationIssues().empty());
+
+  // Drag from B's "in" row LEFT edge band onto A's "out" row middle.
+  auto bPins = view.nodePins("/C/B");
+  const ig::GraphPinInfo* bIn = FindPin(bPins, "in", /*out=*/false);
+  INK_CHECK(bIn != nullptr);
+  double bx = 0, by = 0;
+  view.nodePosition("/C/B", &bx, &by);
+  auto aPins = view.nodePins("/C/A");
+  const ig::GraphPinInfo* aOut = FindPin(aPins, "out", /*out=*/false);
+  INK_CHECK(aOut != nullptr);
+  double ax = 0, ay = 0, aw = 0, ah = 0;
+  view.nodePosition("/C/A", &ax, &ay);
+  view.nodeSize("/C/A", &aw, &ah);
+
+  view.pointerDown(bx + 4.0, bIn->centerY);
+  view.pointerMove(ax + aw * 0.5, aOut->centerY);
+  view.pointerUp(ax + aw * 0.5, aOut->centerY);
+
+  // The connection landed even though it is invalid…
+  INK_CHECK(HasEdge(stage, "/C/B", "in", "/C/A", "out", false));
+  INK_CHECK(view.linkCount() == 2);
+  // …and the host was warned exactly once, naming the feedback loop.
+  INK_CHECK(errors.size() == 1);
+  INK_CHECK(errors[0].find("feedback loop") != std::string::npos);
+  INK_CHECK(!view.configurationIssues().empty());
+  std::printf("  invalid feedback loop still connects + warns ok\n");
+  return true;
+}
+
+// Driving one input from a second output still connects and reports the
+// multiply-driven input.
+bool TestConfigurationErrorMultiDrivenInput() {
+  auto stage = NewDocument({Node("/M/S1", true, 0.0, 0.0),
+                            Node("/M/S2", true, 0.0, 400.0),
+                            Node("/M/D", true, 700.0, 100.0)});
+  stage->addProperty("/M/S1", Numeric("out", "float", 1.0));
+  stage->addProperty("/M/S2", Numeric("out", "float", 2.0));
+  stage->addProperty("/M/D", Numeric("in"));
+  stage->authorConnection("/M/D", "in", "/M/S1", "out");
+
+  ig::NoodlesGraphView view;
+  std::vector<std::string> errors;
+  ig::GraphEditDelegate del;
+  del.configurationError = [&](const std::string& m) { errors.push_back(m); };
+  view.setDelegate(del);
+  view.setDocument(stage);
+  INK_CHECK(view.configurationIssues().empty());
+
+  // Drag from S2's "out" row RIGHT edge band onto D's "in" row middle.
+  auto s2Pins = view.nodePins("/M/S2");
+  const ig::GraphPinInfo* s2Out = FindPin(s2Pins, "out", /*out=*/false);
+  INK_CHECK(s2Out != nullptr);
+  double sx = 0, sy = 0, sw = 0, sh = 0;
+  view.nodePosition("/M/S2", &sx, &sy);
+  view.nodeSize("/M/S2", &sw, &sh);
+  auto dPins = view.nodePins("/M/D");
+  const ig::GraphPinInfo* dIn = FindPin(dPins, "in", /*out=*/false);
+  INK_CHECK(dIn != nullptr);
+  double dx = 0, dy = 0, dw = 0, dh = 0;
+  view.nodePosition("/M/D", &dx, &dy);
+  view.nodeSize("/M/D", &dw, &dh);
+
+  view.pointerDown(sx + sw - 4.0, s2Out->centerY);
+  view.pointerMove(dx + dw * 0.5, dIn->centerY);
+  view.pointerUp(dx + dw * 0.5, dIn->centerY);
+
+  INK_CHECK(HasEdge(stage, "/M/D", "in", "/M/S2", "out", false));
+  INK_CHECK(view.linkCount() == 2);
+  INK_CHECK(errors.size() == 1);
+  INK_CHECK(errors[0].find("2 sources") != std::string::npos);
+  std::printf("  multiply-driven input still connects + warns ok\n");
+  return true;
+}
+
+// configurationIssues() also flags a relationship cycle (both edge kinds share
+// the data-flow orientation).
+bool TestConfigurationIssuesRelationshipCycle() {
+  auto stage = NewDocument(
+      {Node("/R2/A", true, 0.0, 0.0), Node("/R2/B", true, 600.0, 0.0)});
+  stage->addProperty("/R2/A", Relationship("link"));
+  stage->addProperty("/R2/B", Relationship("link"));
+  stage->authorRelationship("/R2/A", "link", "/R2/B");
+  stage->authorRelationship("/R2/B", "link", "/R2/A");
+
+  ig::NoodlesGraphView view;
+  view.setDocument(stage);
+  const std::vector<std::string> issues = view.configurationIssues();
+  INK_CHECK(issues.size() == 1);
+  INK_CHECK(issues[0].find("feedback loop") != std::string::npos);
+  std::printf("  relationship cycle reported by configurationIssues ok\n");
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -1669,6 +1824,12 @@ int main() {
       {"header_tap_toggles_fold", TestHeaderTapTogglesFold},
       {"long_press_removes_node", TestLongPressRemovesNode},
       {"add_prim_node_at", TestAddPrimNodeAt},
+      {"create_node_at", TestCreateNodeAt},
+      {"configuration_error_feedback_loop", TestConfigurationErrorStillConnects},
+      {"configuration_error_multi_driven_input",
+       TestConfigurationErrorMultiDrivenInput},
+      {"configuration_issues_relationship_cycle",
+       TestConfigurationIssuesRelationshipCycle},
   };
   for (const Case& tc : cases) {
     std::printf("[ RUN  ] %s\n", tc.name);

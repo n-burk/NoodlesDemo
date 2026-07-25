@@ -20,6 +20,19 @@ target_link_libraries(NoodlesDemoContractTests PRIVATE NoodlesDemo::Core)
 add_test(NAME noodles_demo_contract
          COMMAND NoodlesDemoContractTests)
 
+# The hair grooming demo. Compiles the same platform-neutral systems both
+# runnable demos link, so geometry, generation, tools, topology-sensitive
+# evaluation, gizmos, camera rays, and render-geometry construction are all
+# covered without a window or a GL context.
+add_executable(NoodlesDemoHairTests
+  ${NOODLES_DEMO_HAIR_TEST_SOURCES}
+  ${NOODLES_DEMO_HAIR_SOURCES})
+target_compile_features(NoodlesDemoHairTests PRIVATE cxx_std_17)
+target_include_directories(NoodlesDemoHairTests PRIVATE
+  "${NOODLES_DEMO_HAIR_INCLUDE_DIR}")
+target_link_libraries(NoodlesDemoHairTests PRIVATE NoodlesDemo::Core)
+add_test(NAME noodles_demo_hair COMMAND NoodlesDemoHairTests)
+
 if(TARGET NoodlesDemoUSD)
   add_executable(NoodlesDemoUsdDocumentTests
     Core/UsdGraphDocumentTests.cpp)
@@ -68,6 +81,27 @@ if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
 
   add_test(NAME noodles_demo_render COMMAND NoodlesDemoRenderTests)
   set_tests_properties(noodles_demo_render PROPERTIES LABELS "render;macos")
+
+  # Offscreen GL coverage for the groom viewport and, critically, for the
+  # blended overlay composite it depends on: only a real GL pass can tell an
+  # overwrite from a source-over blend.
+  add_executable(NoodlesDemoHairRenderTests
+    Render/HairRenderTests.cpp
+    ${NOODLES_DEMO_HAIR_SOURCES}
+    ${NOODLES_DEMO_HAIR_GL_SOURCES})
+  target_include_directories(NoodlesDemoHairRenderTests PRIVATE
+    "${NOODLES_DEMO_HAIR_INCLUDE_DIR}")
+  target_compile_features(NoodlesDemoHairRenderTests PRIVATE cxx_std_17)
+  target_compile_definitions(NoodlesDemoHairRenderTests PRIVATE
+    GL_SILENCE_DEPRECATION
+    "NOODLES_DEMO_TEST_ASSET_DIR=\"${_noodles_demo_test_asset_dir}\"")
+  target_link_libraries(NoodlesDemoHairRenderTests PRIVATE
+    NoodlesDemo::Core
+    "-framework OpenGL")
+
+  add_test(NAME noodles_demo_hair_render COMMAND NoodlesDemoHairRenderTests)
+  set_tests_properties(noodles_demo_hair_render
+                       PROPERTIES LABELS "render;macos")
 
   unset(_noodles_demo_test_noodles_target)
   unset(_noodles_demo_test_asset_dir)

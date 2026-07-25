@@ -108,6 +108,14 @@ class GraphDocument {
                                 const std::string& outputNodeId,
                                 const std::string& outputPort) = 0;
 
+  // Create a brand-new backing node. Documents that cannot author new objects
+  // keep the default and return false; the editor then reports the failure
+  // through its status hook instead of partially mutating the graph.
+  virtual bool createNode(GraphNode node) {
+    (void)node;
+    return false;
+  }
+
   virtual bool setNodePosition(const std::string& nodeId, double x,
                                double y) = 0;
   virtual bool clearNodePosition(const std::string& nodeId) = 0;
