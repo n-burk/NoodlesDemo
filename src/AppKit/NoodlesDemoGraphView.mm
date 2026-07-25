@@ -61,6 +61,12 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
   BOOL _scrollActive;
   BOOL _magnifyActive;
   CGFloat _magnifyScale;
+
+  // Gesture ownership, decided at pointer-down and held until pointer-up.
+  BOOL _backgroundOwnsPointer;
+  BOOL _backgroundOwnsMagnify;
+  NoodlesDemoInputModifiers _pointerModifiers;
+  NSTrackingArea *_trackingArea;
 }
 
 - (instancetype)initWithEditor:
@@ -95,6 +101,11 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
 
   NSOpenGLContext *context = self.openGLContext;
   [context makeCurrentContext];
+  // The host's GL objects were created against this context, so they have to
+  // go before it does — and before the editor's own teardown, mirroring the
+  // order they were created in.
+  if (self.onTeardownBackgroundGL)
+    self.onTeardownBackgroundGL();
   if (_editor && _editorInitialized)
     _editor->cleanupGL();
   [NSOpenGLContext clearCurrentContext];
@@ -297,6 +308,16 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
     return;
   _needsRender = NO;
   [self.openGLContext makeCurrentContext];
+  if (self.onRenderBackground) {
+    // The host draws first, into the same drawable; the editor then composites
+    // the graph over it. This ordering is the whole point of the hook, and it
+    // only works when the editor was told to blend rather than overwrite.
+    const NSRect backing = [self convertRectToBacking:self.bounds];
+    const CGFloat scale = self.bounds.size.width > 0.0
+                              ? backing.size.width / self.bounds.size.width
+                              : 1.0;
+    self.onRenderBackground(backing.size.width, backing.size.height, scale);
+  }
   _editor->renderFrame();
   [self.openGLContext flushBuffer];
 }
@@ -328,18 +349,63 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
   return [self convertPoint:event.locationInWindow fromView:nil];
 }
 
+- (NoodlesDemoInputModifiers)modifiersForEvent:(NSEvent *)event {
+  NoodlesDemoInputModifiers modifiers = NoodlesDemoInputModifierNone;
+  if (event.modifierFlags & NSEventModifierFlagShift)
+    modifiers |= NoodlesDemoInputModifierPrimary;
+  if (event.modifierFlags & NSEventModifierFlagOption)
+    modifiers |= NoodlesDemoInputModifierSecondary;
+  return modifiers;
+}
+
+/// Single decision point for pointer ownership. Graph content always wins;
+/// otherwise the host may claim the gesture, and if it declines the editor
+/// keeps its empty-canvas pan.
+- (BOOL)routePointerDown:(NSPoint)point
+               modifiers:(NoodlesDemoInputModifiers)modifiers {
+  _pointerModifiers = modifiers;
+  _backgroundOwnsPointer = NO;
+  if (!self.graphPanLock && self.onBackgroundPointerDown && _editor &&
+      !_editor->hitsGraphElementAt(point.x, point.y)) {
+    _backgroundOwnsPointer = self.onBackgroundPointerDown(point, modifiers);
+  }
+  if (!_backgroundOwnsPointer)
+    [self pointerDown:point];
+  return _backgroundOwnsPointer;
+}
+
+- (void)routePointerMove:(NSPoint)point {
+  if (_backgroundOwnsPointer) {
+    if (self.onBackgroundPointerMove)
+      self.onBackgroundPointerMove(point, _pointerModifiers);
+    return;
+  }
+  [self pointerMove:point];
+}
+
+- (void)routePointerUp:(NSPoint)point {
+  if (_backgroundOwnsPointer) {
+    if (self.onBackgroundPointerUp)
+      self.onBackgroundPointerUp(point, _pointerModifiers);
+    _backgroundOwnsPointer = NO;
+    return;
+  }
+  [self pointerUp:point];
+}
+
 - (void)mouseDown:(NSEvent *)event {
   [self.window makeFirstResponder:self];
   _mouseOwnsEditor = YES;
   _lastMousePoint = [self pointForEvent:event];
   [self startGestureTimer];
-  [self pointerDown:_lastMousePoint];
+  [self routePointerDown:_lastMousePoint
+               modifiers:[self modifiersForEvent:event]];
 }
 
 - (void)mouseDragged:(NSEvent *)event {
   if (_mouseOwnsEditor) {
     _lastMousePoint = [self pointForEvent:event];
-    [self pointerMove:_lastMousePoint];
+    [self routePointerMove:_lastMousePoint];
   }
 }
 
@@ -348,8 +414,48 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
     return;
   _mouseOwnsEditor = NO;
   _lastMousePoint = [self pointForEvent:event];
-  [self pointerUp:_lastMousePoint];
+  [self routePointerUp:_lastMousePoint];
   [self stopGestureTimerIfIdle];
+}
+
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  if (_trackingArea)
+    [self removeTrackingArea:_trackingArea];
+  _trackingArea = [[NSTrackingArea alloc]
+      initWithRect:NSZeroRect
+           options:(NSTrackingMouseMoved | NSTrackingActiveInKeyWindow |
+                    NSTrackingInVisibleRect)
+             owner:self
+          userInfo:nil];
+  [self addTrackingArea:_trackingArea];
+}
+
+- (void)mouseMoved:(NSEvent *)event {
+  if (!self.onBackgroundHover || _mouseOwnsEditor || self.graphPanLock)
+    return;
+  const NSPoint point = [self pointForEvent:event];
+  if (_editor && _editor->hitsGraphElementAt(point.x, point.y))
+    return;
+  self.onBackgroundHover(point, [self modifiersForEvent:event]);
+}
+
+- (void)keyDown:(NSEvent *)event {
+  // Space-drag is the desktop escape hatch that keeps graph panning reachable
+  // while a host owns background gestures.
+  if (event.keyCode == 49 /* space */) {
+    self.graphPanLock = YES;
+    return;
+  }
+  [super keyDown:event];
+}
+
+- (void)keyUp:(NSEvent *)event {
+  if (event.keyCode == 49 /* space */) {
+    self.graphPanLock = NO;
+    return;
+  }
+  [super keyUp:event];
 }
 
 - (void)rightMouseDown:(NSEvent *)event {
@@ -390,20 +496,39 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
   if (!_editor)
     return;
   const BOOL oneShot = event.phase == NSEventPhaseNone;
+  const NSPoint anchor = [self pointForEvent:event];
   if (!_magnifyActive || event.phase == NSEventPhaseBegan) {
     _magnifyActive = YES;
     _magnifyScale = 1.0;
+    // Same rule as the pointer stream: ownership is settled when the gesture
+    // starts, from where it started, and is not revisited.
+    _backgroundOwnsMagnify =
+        !self.graphPanLock && self.onBackgroundZoomBegin &&
+        !_editor->hitsGraphElementAt(anchor.x, anchor.y) &&
+        self.onBackgroundZoomBegin(anchor);
     [self startGestureTimer];
-    [self pinchBegin];
+    if (!_backgroundOwnsMagnify)
+      [self pinchBegin];
   }
 
   _magnifyScale *= std::max<CGFloat>(0.01, 1.0 + event.magnification);
-  [self pinchUpdate:_magnifyScale anchor:[self pointForEvent:event]];
+  if (_backgroundOwnsMagnify) {
+    if (self.onBackgroundZoomUpdate)
+      self.onBackgroundZoomUpdate(_magnifyScale);
+  } else {
+    [self pinchUpdate:_magnifyScale anchor:anchor];
+  }
 
   if (oneShot || event.phase == NSEventPhaseEnded ||
       event.phase == NSEventPhaseCancelled) {
     _magnifyActive = NO;
-    [self pinchEnd];
+    if (_backgroundOwnsMagnify) {
+      if (self.onBackgroundZoomEnd)
+        self.onBackgroundZoomEnd();
+      _backgroundOwnsMagnify = NO;
+    } else {
+      [self pinchEnd];
+    }
     [self stopGestureTimerIfIdle];
   }
 }
@@ -412,13 +537,20 @@ NSOpenGLPixelFormat *GraphPixelFormat() {
   (void)sender;
   if (_mouseOwnsEditor) {
     _mouseOwnsEditor = NO;
-    [self pointerUp:_lastMousePoint];
+    [self routePointerUp:_lastMousePoint];
   }
   if (_magnifyActive) {
     _magnifyActive = NO;
-    [self pinchEnd];
+    if (_backgroundOwnsMagnify) {
+      if (self.onBackgroundZoomEnd)
+        self.onBackgroundZoomEnd();
+      _backgroundOwnsMagnify = NO;
+    } else {
+      [self pinchEnd];
+    }
   }
   _scrollActive = NO;
+  self.graphPanLock = NO;
   [self stopGestureTimerIfIdle];
 }
 

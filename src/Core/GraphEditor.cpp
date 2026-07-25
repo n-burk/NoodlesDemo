@@ -283,6 +283,10 @@ struct GraphEditor::Impl {
   // Default is a fully TRANSPARENT clear: the editor composites over the canvas.
   std::array<float, 4> clearColor{0.0f, 0.0f, 0.0f, 0.0f};
   float overlayOpacity = 0.5f;
+  // Opt-in: blend the composited graph over host content already present in
+  // the bound framebuffer rather than overwriting it. See
+  // GraphEditor::setOverlayBlendsWithBackground.
+  bool blendWithBackground = false;
   bool valueScrubEnabled = true;
   // Gates the link shader's distance fade (uDimming); the band itself lives
   // in config.linkEdgeDimmingStart/End.
@@ -1064,6 +1068,9 @@ struct GraphEditor::Impl {
 
   // ── overlay compositing ──
   bool overlayComposite() const {
+    // Blending over host content always needs the offscreen pass: the direct
+    // path would clear the host's pixels before drawing the graph.
+    if (blendWithBackground) return true;
     // Direct path only when the graph is fully opaque AND undimmed; otherwise
     // route through the FBO so the coverage alpha is corrected for the canvas.
     return !(clearColor[3] >= 0.999f && overlayOpacity >= 0.999f);
@@ -1145,10 +1152,21 @@ struct GraphEditor::Impl {
     glViewport(0, 0, viewportW, viewportH);
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
-    // The full-viewport quad OWNS every pixel of our dedicated overlay surface,
-    // and its output is already premultiplied → overwrite (no blend) is correct
-    // and avoids a double-composite before the OS window compositor.
-    glDisable(GL_BLEND);
+    if (blendWithBackground) {
+      // The host drew into this framebuffer first, so the quad no longer owns
+      // every pixel. The shader's output is premultiplied, which makes
+      // (ONE, ONE_MINUS_SRC_ALPHA) the matching source-over factor pair. Over a
+      // transparent-black target this is arithmetically identical to the
+      // overwrite below, so the two paths agree wherever both are valid.
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    } else {
+      // The full-viewport quad OWNS every pixel of our dedicated overlay
+      // surface, and its output is already premultiplied → overwrite (no blend)
+      // is correct and avoids a double-composite before the OS window
+      // compositor.
+      glDisable(GL_BLEND);
+    }
 
     compositeProg->use();
     glActiveTexture(GL_TEXTURE0);
@@ -2293,6 +2311,14 @@ void GraphEditor::setClearColor(float r, float g, float b, float a) {
 
 void GraphEditor::setOverlayOpacity(float opacity) {
   impl_->overlayOpacity = std::clamp(opacity, 0.0f, 1.0f);
+}
+
+void GraphEditor::setOverlayBlendsWithBackground(bool enabled) {
+  impl_->blendWithBackground = enabled;
+}
+
+bool GraphEditor::overlayBlendsWithBackground() const {
+  return impl_->blendWithBackground;
 }
 
 void GraphEditor::setValueScrubEnabled(bool enabled) {

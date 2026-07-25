@@ -25,6 +25,7 @@ set(NOODLES_DEMO_USD_TARGET "" CACHE STRING
 
 include(cmake/CoreSources.cmake)
 include(cmake/AppleSources.cmake)
+include(cmake/HairSources.cmake)
 
 if(NOT TARGET noodles::noodles AND NOT TARGET noodles)
   if(NOODLES_DEMO_NOODLES_SOURCE_DIR)

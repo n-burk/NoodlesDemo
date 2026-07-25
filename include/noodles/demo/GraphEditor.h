@@ -104,6 +104,22 @@ class GraphEditor {
   void setValueScrubEnabled(bool enabled);
   void setDisplayFrame(double frame);
 
+  // Composite the graph over whatever the host already drew into the bound
+  // framebuffer, instead of overwriting every pixel of it.
+  //
+  // Off by default, because the shipping shells present the graph on its own
+  // transparent surface stacked above a separate canvas view: there the
+  // overlay quad legitimately owns every pixel, and an unblended write is both
+  // correct and one blend cheaper. A host that renders its own scene into the
+  // same drawable immediately before renderFrame() enables this instead. The
+  // graph is then always drawn through the offscreen pass — so its clear never
+  // reaches the host's pixels — and the result is blended back with
+  // premultiplied source-over. Enabling it makes the host responsible for
+  // covering the viewport; the editor no longer guarantees a defined value for
+  // pixels the graph does not touch.
+  void setOverlayBlendsWithBackground(bool enabled);
+  bool overlayBlendsWithBackground() const;
+
   // Distance-based link fading (the noodles link-dimming shader path): a
   // noodle whose nearest endpoint sits farther than endFrac × the larger
   // viewport world dimension from the viewport center starts fading, and is

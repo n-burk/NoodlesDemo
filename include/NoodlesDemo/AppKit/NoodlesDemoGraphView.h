@@ -14,6 +14,8 @@
 #undef NOODLES_DEMO_UNDEFINE_GL_SILENCE_DEPRECATION
 #endif
 
+#import <NoodlesDemo/NoodlesDemoBackgroundHost.h>
+
 #ifdef __cplusplus
 #include <memory>
 
@@ -91,6 +93,53 @@ NS_ASSUME_NONNULL_BEGIN
 /// (for example a feedback loop). The edit is still applied; hosts typically
 /// present the message as a transient error toast.
 @property(nonatomic, copy, nullable) void (^onConfigurationError)(NSString *message);
+
+#pragma mark - Background host
+
+/// Draw the host's own scene into the drawable, immediately before the editor
+/// composites the graph over it. The GL context is current and the target
+/// framebuffer is bound. Sizes are physical pixels.
+///
+/// A host using this must also call
+/// GraphEditor::setOverlayBlendsWithBackground(true); otherwise the graph's
+/// composite pass overwrites every pixel this block drew.
+@property(nonatomic, copy, nullable) void (^onRenderBackground)
+    (CGFloat widthPixels, CGFloat heightPixels, CGFloat contentScale);
+
+/// Release the host's GL objects. Called with the context current, while it is
+/// still valid, before the view tears down its own resources.
+@property(nonatomic, copy, nullable) void (^onTeardownBackgroundGL)(void);
+
+/// Consulted on pointer-down when the press did not land on graph content
+/// (see GraphEditor::hitsGraphElementAt). Returning YES gives the host the
+/// whole gesture: move and up are delivered to the background hooks and the
+/// editor never sees them. Returning NO leaves the gesture with the editor,
+/// which treats an empty-canvas drag as a graph pan.
+///
+/// Ownership is decided once, here, and is never revised mid-gesture.
+@property(nonatomic, copy, nullable) BOOL (^onBackgroundPointerDown)
+    (CGPoint point, NoodlesDemoInputModifiers modifiers);
+@property(nonatomic, copy, nullable) void (^onBackgroundPointerMove)
+    (CGPoint point, NoodlesDemoInputModifiers modifiers);
+@property(nonatomic, copy, nullable) void (^onBackgroundPointerUp)
+    (CGPoint point, NoodlesDemoInputModifiers modifiers);
+
+/// Pointer motion with no button held, for hover feedback. Never delivered
+/// while a gesture is in flight or over graph content.
+@property(nonatomic, copy, nullable) void (^onBackgroundHover)
+    (CGPoint point, NoodlesDemoInputModifiers modifiers);
+
+/// Consulted when a magnify gesture begins away from graph content. Returning
+/// YES routes the whole gesture to onBackgroundZoomUpdate instead of zooming
+/// the graph.
+@property(nonatomic, copy, nullable) BOOL (^onBackgroundZoomBegin)(CGPoint anchor);
+@property(nonatomic, copy, nullable) void (^onBackgroundZoomUpdate)(CGFloat scale);
+@property(nonatomic, copy, nullable) void (^onBackgroundZoomEnd)(void);
+
+/// While YES, background gestures bypass the host hooks and go to the editor,
+/// so graph panning and zooming stay reachable even when a host owns the
+/// background. Held automatically while the space bar is down.
+@property(nonatomic, assign) BOOL graphPanLock;
 
 @end
 #pragma clang diagnostic pop
