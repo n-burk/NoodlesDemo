@@ -5,10 +5,8 @@ tool. A procedural scalp, a seeded guide set, editable gizmos, and a styled
 clump are rendered into the graph view's own OpenGL drawable, and the
 transparent `noodles` graph is composited on top of them.
 
-The point of the demo is that the graph is not a picture of the groom — it *is*
-the groom. Every control is a real property row, evaluation follows the
-connections you actually authored, and the tools are owned by the nodes whose
-switches arm them.
+Every control is a real property row, evaluation follows the connections you
+actually authored, and the tools are owned by the nodes whose switches arm them.
 
 ```text
 Scalp ──┬──▶ Create Guides ──▶ Guide Sculpt ──▶ Clump ──▶ Generate Hair ──▶ Output
@@ -30,23 +28,9 @@ is an example consumer of it, exactly like the image-processing fixture:
 `NoodlesDemoHair` contains no GL, Apple, or OpenUSD types, so the CPU test
 binary links exactly the code the apps run.
 
-### The one Core change
-
-`GraphEditor` normally composites its offscreen graph onto the bound
-framebuffer with blending **disabled** — the overlay quad owns every pixel,
-which is correct when the graph sits on its own transparent surface above a
-separate canvas view. A host that draws into the *same* drawable needs the
-other behavior, so Core gained one generic, opt-in switch:
-
-```cpp
-editor->setOverlayBlendsWithBackground(true);
-```
-
-With it on, the graph always takes the offscreen path (so its clear never
-reaches the host's pixels) and the result is blended back with premultiplied
-source-over. Over a transparent-black target the two paths are arithmetically
-identical, so nothing changes for existing adopters. `tests/Render/HairRenderTests.cpp`
-pins both directions with real pixels.
+The groom draws into the graph view's own drawable, which requires
+`editor->setOverlayBlendsWithBackground(true)`. That switch is generic Core API,
+not hair-specific; see DESIGN.md's *Compositing* section.
 
 ## The graph
 
@@ -356,8 +340,8 @@ Guides starts with no guides and says so; draw some.
 
 | Suite | Covers |
 | --- | --- |
-| `noodles_demo_hair` (37 cases) | Scalp mesh and ray hits, resampling and smoothing, seeded root attachment, deterministic generation, clamping, Voronoi regions and convergence, painted-weight gating, the clump map image, comb behavior, camera rays and axis constraints, graph shape and group-collision rules, topology-driven evaluation, Clump on guides *and* on generated curves, supplied clump curves, dirty generations, tool exclusivity, gesture ownership, all five tools end to end, gizmo visibility, ribbon geometry, overlay contents, the node palette |
-| `noodles_demo_hair_render` (5 cases) | Real offscreen GL: the groom rasterizes, display switches remove geometry, the graph composite preserves the groom when blending and erases it when not, the graph draws over the groom, and orbiting re-uploads nothing |
+| `noodles_demo_hair` | Scalp mesh and ray hits, resampling and smoothing, seeded root attachment, deterministic generation, clamping, Voronoi regions and convergence, painted-weight gating, the clump map image, comb behavior, camera rays and axis constraints, graph shape and group-collision rules, topology-driven evaluation including the `clumps` side input, Clump on guides *and* on generated curves, supplied clump curves, chained Clumps resolving to the downstream stage, side branches never becoming stages, dirty generations, tool exclusivity, gesture ownership, all five tools end to end, gizmo visibility, ribbon geometry, overlay contents, the node palette |
+| `noodles_demo_hair_render` | Real offscreen GL: the groom rasterizes, display switches remove geometry, the graph composite preserves the groom when blending and erases it when not, the graph draws over the groom, orbiting re-uploads nothing, and the clump map paints pastel regions on the scalp |
 
 ## Limitations
 
